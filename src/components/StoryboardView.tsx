@@ -21,6 +21,7 @@ interface StoryboardViewProps {
   onUpdateScene: (sceneId: string, updatedFields: Partial<Scene>) => void;
   onRegenerateImage: (sceneId: string, customPrompt?: string) => Promise<void>;
   onRegenerateVoice: (sceneId: string, customVO?: string) => Promise<void>;
+  onRegenerateVideo: (sceneId: string, customPrompt?: string) => Promise<void>;
   onPreviewScene: (scene: Scene) => void;
 }
 
@@ -29,13 +30,18 @@ export default function StoryboardView({
   onUpdateScene,
   onRegenerateImage,
   onRegenerateVoice,
+  onRegenerateVideo,
   onPreviewScene
 }: StoryboardViewProps) {
   const [editingCell, setEditingCell] = useState<{ sceneId: string; field: keyof Scene } | null>(null);
   const [editedValue, setEditedValue] = useState("");
-  const [loadingSceneId, setLoadingSceneId] = useState<string | null>(null);
   const [lockedSeeds, setLockedSeeds] = useState<Record<string, boolean>>({});
   const [speakingSceneId, setSpeakingSceneId] = useState<string | null>(null);
+  
+  // Granular asset generation tracking
+  const [loadingImages, setLoadingImages] = useState<Record<string, boolean>>({});
+  const [loadingAudios, setLoadingAudios] = useState<Record<string, boolean>>({});
+  const [loadingVideos, setLoadingVideos] = useState<Record<string, boolean>>({});
 
   if (!storyboard) {
     return (
@@ -58,13 +64,35 @@ export default function StoryboardView({
   };
 
   const triggerRegenImage = async (sceneId: string, currentPrompt: string) => {
-    setLoadingSceneId(sceneId);
+    setLoadingImages(prev => ({ ...prev, [sceneId]: true }));
     try {
       await onRegenerateImage(sceneId, currentPrompt);
     } catch (err) {
       console.error(err);
     } finally {
-      setLoadingSceneId(null);
+      setLoadingImages(prev => ({ ...prev, [sceneId]: false }));
+    }
+  };
+
+  const triggerRegenAudio = async (sceneId: string, currentVo: string) => {
+    setLoadingAudios(prev => ({ ...prev, [sceneId]: true }));
+    try {
+      await onRegenerateVoice(sceneId, currentVo);
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setLoadingAudios(prev => ({ ...prev, [sceneId]: false }));
+    }
+  };
+
+  const triggerRegenVideo = async (sceneId: string, motionPrompt: string) => {
+    setLoadingVideos(prev => ({ ...prev, [sceneId]: true }));
+    try {
+      await onRegenerateVideo(sceneId, motionPrompt);
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setLoadingVideos(prev => ({ ...prev, [sceneId]: false }));
     }
   };
 
@@ -115,6 +143,28 @@ export default function StoryboardView({
     }
   };
 
+  // Helper for rendering status indicators beautifully
+  const renderStatusBadge = (status?: string, err?: string | null) => {
+    const activeStatus = status || "pending";
+    if (activeStatus === "completed") {
+      return <span className="inline-flex items-center px-1.5 py-0.5 rounded-full text-[9px] font-medium bg-emerald-950/40 border border-emerald-900/40 text-emerald-400">Ready</span>;
+    }
+    if (activeStatus === "generating") {
+      return <span className="inline-flex items-center px-1.5 py-0.5 rounded-full text-[9px] font-medium bg-amber-950/40 border border-amber-900/40 text-amber-400 animate-pulse">Running</span>;
+    }
+    if (activeStatus === "failed") {
+      return (
+        <span 
+          className="inline-flex items-center px-1.5 py-0.5 rounded-full text-[9px] font-medium bg-red-950/40 border border-red-900/40 text-red-400 cursor-help"
+          title={err || "Gagal menghubungi service lokal"}
+        >
+          Failed
+        </span>
+      );
+    }
+    return <span className="inline-flex items-center px-1.5 py-0.5 rounded-full text-[9px] font-medium bg-zinc-900 border border-zinc-800 text-zinc-500 font-mono">Idle</span>;
+  };
+
   return (
     <div className="space-y-8">
       {/* Structural Storyboard Table */}
@@ -135,12 +185,12 @@ export default function StoryboardView({
           <table className="w-full text-left text-xs border-collapse">
             <thead>
               <tr className="bg-zinc-900/30 text-zinc-500 text-[10px] font-semibold tracking-wider uppercase border-b border-zinc-850">
-                <th className="py-3 px-4 w-[140px] text-center">Part / Durasi</th>
+                <th className="py-3 px-4 w-[140px] text-center font-mono">Part / Durasi</th>
                 <th className="py-3 px-4 w-[160px]">Skenario Preview</th>
                 <th className="py-3 px-4 min-w-[200px]">Aksi & Gesture (Action)</th>
-                <th className="py-3 px-4 min-w-[200px]">Suara Narasi (Voice Over)</th>
+                <th className="py-3 px-4 min-w-[220px]">Suara Narasi (Voice Over)</th>
                 <th className="py-3 px-4 min-w-[240px]">Gambar Prompt (Text-to-Image)</th>
-                <th className="py-3 px-4 w-[160px]">Status & Aksi</th>
+                <th className="py-3 px-4 w-[210px] text-center">Status & Pipeline Aksi</th>
               </tr>
             </thead>
             <tbody>
@@ -166,7 +216,10 @@ export default function StoryboardView({
 
                     {/* Scenes under this part */}
                     {part.scenes.map((scene: Scene) => {
-                      const isImageLoading = loadingSceneId === scene.scene_id;
+                      const isImageLoading = loadingImages[scene.scene_id] || false;
+                      const isAudioLoading = loadingAudios[scene.scene_id] || false;
+                      const isVideoLoading = loadingVideos[scene.scene_id] || false;
+                      
                       const isSpeaking = speakingSceneId === scene.scene_id;
                       const isSeedLocked = lockedSeeds[scene.scene_id] || false;
 
@@ -198,7 +251,7 @@ export default function StoryboardView({
                                   referrerPolicy="no-referrer"
                                 />
                               ) : (
-                                <div className="absolute inset-0 flex flex-col items-center justify-center text-center p-2 text-zinc-600 bg-zinc-950">
+                                <div className="absolute inset-0 flex flex-col items-center justify-center text-center p-2 text-zinc-650 bg-zinc-950">
                                   <Sparkles size={16} className="animate-pulse text-zinc-500 mb-1" />
                                   <span className="text-[10px]">No visuals</span>
                                 </div>
@@ -271,14 +324,16 @@ export default function StoryboardView({
                                     <Edit size={10} />
                                   </span>
                                 </div>
-                                <button 
-                                  onClick={() => speakVoiceOver(scene)}
-                                  className={`flex items-center gap-1.5 px-2 py-1 ${isSpeaking ? 'bg-amber-600 text-white' : 'bg-zinc-900 hover:bg-zinc-800 text-zinc-400'} rounded border border-zinc-800 text-[10px] font-medium transition`}
-                                  id={`btn-play-voice-${scene.scene_id}`}
-                                >
-                                  <Volume2 size={11} className={isSpeaking ? 'animate-bounce' : ''} />
-                                  {isSpeaking ? "Mendengar..." : "Pengucapan (TTS)"}
-                                </button>
+                                <div className="flex gap-1.5">
+                                  <button 
+                                    onClick={() => speakVoiceOver(scene)}
+                                    className={`flex-1 flex items-center justify-center gap-1 px-2 py-1 ${isSpeaking ? 'bg-amber-600 text-white' : 'bg-zinc-900 hover:bg-zinc-800 text-zinc-400'} rounded border border-zinc-800 text-[10px] font-semibold transition`}
+                                    id={`btn-play-voice-${scene.scene_id}`}
+                                  >
+                                    <Volume2 size={11} className={isSpeaking ? 'animate-bounce' : ''} />
+                                    Browser Audio
+                                  </button>
+                                </div>
                               </div>
                             )}
                           </td>
@@ -315,8 +370,8 @@ export default function StoryboardView({
                                 
                                 {scene.motion_prompt && (
                                   <div className="pt-2 border-t border-zinc-900">
-                                    <span className="text-[9px] uppercase font-bold text-zinc-650 block">Motion:</span>
-                                    <span className="text-[10px] italic text-zinc-500 font-mono">{scene.motion_prompt}</span>
+                                    <span className="text-[9px] uppercase font-bold text-zinc-650 block font-mono">Motion Prompt:</span>
+                                    <span className="text-[10px] italic text-zinc-500 font-mono leading-tight block">{scene.motion_prompt}</span>
                                   </div>
                                 )}
                               </div>
@@ -325,34 +380,76 @@ export default function StoryboardView({
 
                           {/* Generation trigger status & action triggers */}
                           <td className="py-4 px-4 bg-zinc-900/5">
-                            <div className="space-y-2.5">
-                              {/* Generation Buttons */}
-                              <button 
-                                onClick={() => triggerRegenImage(scene.scene_id, scene.image_prompt)}
-                                disabled={isImageLoading}
-                                className="w-full flex items-center justify-center gap-1.5 px-2.5 py-1.5 bg-amber-500 hover:bg-amber-400 text-zinc-950 hover:text-zinc-950 disabled:opacity-40 text-[10px] font-bold rounded-lg shadow-md hover:shadow-amber-500/25 transition cursor-pointer"
-                                id={`btn-regen-image-${scene.scene_id}`}
-                              >
-                                <RotateCw size={11} className={isImageLoading ? 'animate-spin' : ''} />
-                                {isImageLoading ? "Generating..." : "Generate AI"}
-                              </button>
+                            <div className="space-y-3">
+                              
+                              {/* 1. Image generator controls */}
+                              <div className="space-y-1 bg-zinc-950/40 p-2 border border-zinc-900 rounded-lg">
+                                <div className="flex justify-between items-center mb-1">
+                                  <span className="text-[9px] font-bold text-zinc-500 uppercase tracking-wider">Visual</span>
+                                  {renderStatusBadge(scene.image_status, scene.error)}
+                                </div>
+                                <button 
+                                  onClick={() => triggerRegenImage(scene.scene_id, scene.image_prompt)}
+                                  disabled={isImageLoading}
+                                  className="w-full flex items-center justify-center gap-1 px-2 py-1 bg-zinc-900 hover:bg-zinc-800 disabled:opacity-40 text-amber-500 hover:text-amber-400 text-[10px] font-bold rounded border border-zinc-800/80 hover:border-zinc-700 transition cursor-pointer"
+                                  id={`btn-regen-image-${scene.scene_id}`}
+                                >
+                                  <RotateCw size={10} className={isImageLoading ? 'animate-spin' : ''} />
+                                  {isImageLoading ? "Creating..." : "Z-Image Turbo"}
+                                </button>
+                              </div>
 
-                              {/* Toggle Seed Lock */}
+                              {/* 2. TTS generator controls */}
+                              <div className="space-y-1 bg-zinc-950/40 p-2 border border-zinc-900 rounded-lg">
+                                <div className="flex justify-between items-center mb-1">
+                                  <span className="text-[9px] font-bold text-zinc-500 uppercase tracking-wider">WAV Audio</span>
+                                  {renderStatusBadge(scene.tts_status, scene.error)}
+                                </div>
+                                <button 
+                                  onClick={() => triggerRegenAudio(scene.scene_id, scene.vo)}
+                                  disabled={isAudioLoading}
+                                  className="w-full flex items-center justify-center gap-1 px-2 py-1 bg-zinc-900 hover:bg-zinc-800 disabled:opacity-40 text-amber-500 hover:text-amber-400 text-[10px] font-bold rounded border border-zinc-800/80 hover:border-zinc-700 transition cursor-pointer"
+                                  id={`btn-regen-audio-${scene.scene_id}`}
+                                >
+                                  <RotateCw size={10} className={isAudioLoading ? 'animate-spin' : ''} />
+                                  {isAudioLoading ? "Speaking..." : "F5-TTS Sync"}
+                                </button>
+                              </div>
+
+                              {/* 3. LTX-Video generator controls */}
+                              <div className="space-y-1 bg-zinc-950/40 p-2 border border-zinc-900 rounded-lg">
+                                <div className="flex justify-between items-center mb-1">
+                                  <span className="text-[9px] font-bold text-zinc-500 uppercase tracking-wider">Video</span>
+                                  {renderStatusBadge(scene.video_status, scene.error)}
+                                </div>
+                                <button 
+                                  onClick={() => triggerRegenVideo(scene.scene_id, scene.motion_prompt)}
+                                  disabled={isVideoLoading}
+                                  className="w-full flex items-center justify-center gap-1 px-2 py-1 bg-zinc-900 hover:bg-zinc-800 disabled:opacity-40 text-amber-500 hover:text-amber-400 text-[10px] font-bold rounded border border-zinc-800/80 hover:border-zinc-700 transition cursor-pointer"
+                                  id={`btn-regen-video-${scene.scene_id}`}
+                                >
+                                  <RotateCw size={10} className={isVideoLoading ? 'animate-spin' : ''} />
+                                  {isVideoLoading ? "Motion..." : "LTX-Video Gen"}
+                                </button>
+                              </div>
+
+                              {/* Lock Seed option */}
                               <button 
                                 onClick={() => toggleSeedClass(scene.scene_id)}
-                                className={`w-full flex items-center justify-center gap-1.5 px-2.5 py-1 border ${isSeedLocked ? 'bg-amber-950/40 border-amber-900 text-amber-400' : 'bg-zinc-900 border-zinc-800/80 text-zinc-400'} text-[10px] font-medium rounded-lg transition`}
+                                className={`w-full flex items-center justify-center gap-1 py-1 border ${isSeedLocked ? 'bg-amber-950/40 border-amber-900 text-amber-400' : 'bg-transparent border-zinc-900 text-zinc-600'} text-[9px] font-medium rounded transition`}
                                 id={`btn-lock-seed-${scene.scene_id}`}
                               >
                                 {isSeedLocked ? (
                                   <>
-                                    <Lock size={11} /> Seat Locked
+                                    <Lock size={10} /> Seed Locked (AI)
                                   </>
                                 ) : (
                                   <>
-                                    <Unlock size={11} /> Lock Seed (AI)
+                                    <Unlock size={10} /> Unlock Seed
                                   </>
                                 )}
                               </button>
+                              
                             </div>
                           </td>
                         </tr>

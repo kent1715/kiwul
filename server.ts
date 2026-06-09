@@ -1,14 +1,26 @@
 import express from "express";
 import path from "path";
 import fs from "fs";
+import { execSync } from "child_process";
 import { createServer as createViteServer } from "vite";
 import { GoogleGenAI, Type } from "@google/genai";
 import dotenv from "dotenv";
+
+// Import local provider adapters
+import { generateLocalImage } from "./src/server/providers/image.zimage";
+import { generateLocalTTS } from "./src/server/providers/tts.f5tts";
+import { generateEdgeTTS } from "./src/server/providers/tts.edge";
+import { generateLocalVideo } from "./src/server/providers/video.ltx";
+import { renderCompilation } from "./src/server/providers/render.ffmpeg";
+import { runOllamaLLM } from "./src/server/providers/llm.ollama";
 
 dotenv.config();
 
 const app = express();
 app.use(express.json());
+
+// Serve outputs directory statically for vertical media assets (images, videos, TTS wave tracks)
+app.use("/outputs", express.static(path.join(process.cwd(), "outputs")));
 
 const PORT = 3000;
 
@@ -23,9 +35,33 @@ const ai = new GoogleGenAI({
   },
 });
 
-// Paths to database files
-const PROJECTS_FILE = path.join(process.cwd(), "src", "db", "projects.json");
-const PROVIDERS_FILE = path.join(process.cwd(), "src", "db", "providers.json");
+// Relocate database directories and migrate existing files if any
+function runDatabaseMigration() {
+  const oldDir = path.join(process.cwd(), "src", "db");
+  const newDir = path.join(process.cwd(), "data");
+  
+  fs.mkdirSync(newDir, { recursive: true });
+  fs.mkdirSync(path.join(process.cwd(), "outputs"), { recursive: true });
+
+  const oldProj = path.join(oldDir, "projects.json");
+  const newProj = path.join(newDir, "projects.json");
+  if (fs.existsSync(oldProj) && !fs.existsSync(newProj)) {
+    console.log("[Migration] Migrating projects.json to data/projects.json...");
+    fs.copyFileSync(oldProj, newProj);
+  }
+
+  const oldProv = path.join(oldDir, "providers.json");
+  const newProv = path.join(newDir, "providers.json");
+  if (fs.existsSync(oldProv) && !fs.existsSync(newProv)) {
+    console.log("[Migration] Migrating providers.json to data/providers.json...");
+    fs.copyFileSync(oldProv, newProv);
+  }
+}
+runDatabaseMigration();
+
+// Paths to localized database files
+const PROJECTS_FILE = path.join(process.cwd(), "data", "projects.json");
+const PROVIDERS_FILE = path.join(process.cwd(), "data", "providers.json");
 
 // Helper to clean JSON string from LLM responses
 function cleanJsonResponse(text: string): any {
@@ -82,34 +118,7 @@ async function runLLM(prompt: string, systemInstruction: string, temperature: nu
   const llmConfig = providers.llm || { provider: "gemini", model: "gemini-3.5-flash" };
   
   if (llmConfig.provider === "ollama") {
-    const baseUrl = llmConfig.base_url || "http://127.0.0.1:11434";
-    const endpoint = `${baseUrl.replace(/\/+$/, "")}/v1/chat/completions`;
-    
-    console.log(`[Ollama] Fetching chat completion from: ${endpoint} (Model: ${llmConfig.model})`);
-    const res = await fetch(endpoint, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json"
-      },
-      body: JSON.stringify({
-        model: llmConfig.model || "qwen3:8b",
-        messages: [
-          { role: "system", content: systemInstruction },
-          { role: "user", content: prompt }
-        ],
-        temperature: temperature,
-        top_p: 0.8,
-        stream: false
-      })
-    });
-    
-    if (!res.ok) {
-      const errText = await res.text();
-      throw new Error(`Ollama Integration Error [Code ${res.status}]: ${errText}. Please make sure Ollama is active locally.`);
-    }
-    
-    const responseData: any = await res.json();
-    return responseData.choices?.[0]?.message?.content || "";
+    return runOllamaLLM(prompt, systemInstruction, llmConfig, temperature);
   } else {
     // Google Gemini
     console.log(`[Gemini] Generating content with model: ${llmConfig.model || "gemini-3.5-flash"}`);
@@ -204,10 +213,42 @@ function readProviders(): any {
     if (!fs.existsSync(PROVIDERS_FILE)) {
       fs.mkdirSync(path.dirname(PROVIDERS_FILE), { recursive: true });
       const defaultProviders = {
-        llm: { provider: "gemini", base_url: "", model: "gemini-3.5-flash" },
-        image: { provider: "gemini", base_url: "", model: "gemini-2.5-flash-image" },
-        tts: { provider: "gemini", base_url: "", model: "gemini-3.1-flash-tts-preview" },
-        video: { provider: "gemini", base_url: "", model: "veo-3.1-lite-generate-preview" }
+        llm: {
+          provider: "ollama",
+          base_url: "http://127.0.0.1:11434/v1",
+          model: "qwen3:8b",
+          enabled: true
+        },
+        image: {
+          provider: "zimage",
+          base_url: "http://127.0.0.1:9100/v1",
+          model: "z-image-turbo",
+          enabled: true,
+          default_size: "768x1024",
+          steps: 8,
+          cfg: 1,
+          allow_fallback: false
+        },
+        video: {
+          provider: "ltx",
+          base_url: "http://127.0.0.1:9200/v1",
+          model: "comfy-ltxv-i2v",
+          enabled: true,
+          duration: 3,
+          fps: 24,
+          resolution: "768x1024"
+        },
+        tts: {
+          provider: "edge",
+          base_url: "",
+          model: "id-ID-ArdiNeural",
+          enabled: true
+        },
+        render: {
+          provider: "ffmpeg",
+          enabled: true,
+          output_format: "mp4"
+        }
       };
       fs.writeFileSync(PROVIDERS_FILE, JSON.stringify(defaultProviders, null, 2), "utf-8");
       return defaultProviders;
@@ -792,11 +833,17 @@ Output a raw, valid JSON storyboard conforming exactly to this structure, strict
     console.log(`[Script Splitter / Storyboarder] Generating layout scenes for project: ${project.project_id}`);
     const generatedStoryboard = await runLLMWithRetryAndRepair(prompt, GLOBAL_SYSTEM_PROMPT, 0.55);
     
-    // Auto populate placeholder paths to make preview immediately beautiful
+    // Initialize all scene statuses as pending
     generatedStoryboard.parts.forEach((p: any) => {
       p.scenes.forEach((s: any) => {
-        s.image_path = getUnsplashFallback(s.image_prompt || s.action, "9:16");
-        s.status = "completed";
+        s.image_status = "pending";
+        s.video_status = "pending";
+        s.tts_status = "pending";
+        s.render_status = "pending";
+        s.image_path = "";
+        s.video_path = "";
+        s.audio_path = "";
+        s.error = null;
       });
     });
 
@@ -814,11 +861,13 @@ Output a raw, valid JSON storyboard conforming exactly to this structure, strict
       if (repairOutput && repairOutput.repaired_storyboard) {
         // Replace with repaired schema
         project.storyboard = repairOutput.repaired_storyboard;
-        // Make sure Unsplash fallbacks are kept intact
+        // Preserve scene pending/current statuses
         project.storyboard.parts.forEach((p: any) => {
           p.scenes.forEach((s: any) => {
-            s.image_path = getUnsplashFallback(s.image_prompt || s.action, "9:16");
-            s.status = "completed";
+            s.image_status = s.image_status || "pending";
+            s.video_status = s.video_status || "pending";
+            s.tts_status = s.tts_status || "pending";
+            s.render_status = s.render_status || "pending";
           });
         });
 
@@ -863,10 +912,10 @@ app.post("/api/projects/:id/run-qc", async (req, res) => {
         project.storyboard = repairOutput.repaired_storyboard;
         project.storyboard.parts.forEach((p: any) => {
           p.scenes.forEach((s: any) => {
-            if (!s.image_path) {
-              s.image_path = getUnsplashFallback(s.image_prompt || s.action, "9:16");
-            }
-            s.status = "completed";
+            s.image_status = s.image_status || "pending";
+            s.video_status = s.video_status || "pending";
+            s.tts_status = s.tts_status || "pending";
+            s.render_status = s.render_status || "pending";
           });
         });
         qcReport.qc_score = 100;
@@ -888,7 +937,7 @@ app.post("/api/projects/:id/run-qc", async (req, res) => {
   }
 });
 
-// 12. Regenerate a scene image (Simulating image gen, falling back to beautiful contextual Unsplash photo based on prompts)
+// 12. Regenerate a scene image (Using Z-Image local provider, falling back to Gemini/Unsplash)
 app.post("/api/projects/:id/scenes/:scene_id/image", async (req, res) => {
   const { custom_prompt } = req.body;
   const projects = readProjects();
@@ -906,10 +955,37 @@ app.post("/api/projects/:id/scenes/:scene_id/image", async (req, res) => {
   
   if (!sceneMatched) return res.status(404).json({ error: "Scene not found in storyboard." });
   
+  const activePrompt = custom_prompt || sceneMatched.image_prompt;
+  
   try {
-    const activePrompt = custom_prompt || sceneMatched.image_prompt;
+    sceneMatched.image_status = "generating";
+    writeProjects(projects);
     
-    // If user's API keys support AI Generation (or if we attempt nano banana)
+    const providers = readProviders();
+    const imgConfig = providers.image || { provider: "gemini", model: "gemini-2.5-flash-image" };
+    
+    if (imgConfig.provider === "zimage") {
+      console.log(`[Image API Dispatch] Using local Z-Image for scene ${req.params.scene_id}`);
+      const savedPath = await generateLocalImage(
+        project.project_id,
+        sceneMatched.scene_id,
+        activePrompt,
+        imgConfig
+      );
+      
+      if (savedPath) {
+        sceneMatched.image_path = savedPath;
+        sceneMatched.image_status = "completed";
+        sceneMatched.error = null;
+        projects[idx] = project;
+        writeProjects(projects);
+        return res.json({ status: "success", image_path: savedPath });
+      } else {
+        throw new Error("Local Z-Image adapter failed to produce saved local path.");
+      }
+    }
+    
+    // Fallback: Gemini native generator (Server side)
     if (apiKey) {
       try {
         console.log("Generating styled visual image with Gemini...");
@@ -936,7 +1012,8 @@ app.post("/api/projects/:id/scenes/:scene_id/image", async (req, res) => {
         
         if (foundBase64) {
           sceneMatched.image_path = `data:image/png;base64,${foundBase64}`;
-          sceneMatched.status = "completed";
+          sceneMatched.image_status = "completed";
+          sceneMatched.error = null;
           projects[idx] = project;
           writeProjects(projects);
           return res.json({ status: "success", image_path: sceneMatched.image_path });
@@ -946,16 +1023,20 @@ app.post("/api/projects/:id/scenes/:scene_id/image", async (req, res) => {
       }
     }
     
-    // Beautiful aesthetic contextual photography fallback matching exact prompt phrases
+    // Standard aesthetic Unsplash fallback
     const generatedFallback = getUnsplashFallback(activePrompt, "9:16");
     sceneMatched.image_path = generatedFallback;
-    sceneMatched.status = "completed";
+    sceneMatched.image_status = "completed";
+    sceneMatched.error = null;
     
     projects[idx] = project;
     writeProjects(projects);
     res.json({ status: "success", image_path: generatedFallback });
   } catch (error: any) {
     console.error("Image generation failed:", error);
+    sceneMatched.image_status = "failed";
+    sceneMatched.error = error.message;
+    writeProjects(projects);
     res.status(500).json({ error: error.message || "Failed to generate image" });
   }
 });
@@ -978,17 +1059,93 @@ app.post("/api/projects/:id/scenes/:scene_id/tts", async (req, res) => {
   
   try {
     const voText = custom_vo || sceneMatched.vo;
+    sceneMatched.tts_status = "generating";
+    writeProjects(projects);
     
-    // We update scene matched and set voice confirmation
-    sceneMatched.audio_path = "local_tts_simulation";
+    const providers = readProviders();
+    const ttsConfig = providers.tts || { provider: "f5tts", base_url: "http://127.0.0.1:9400", model: "f5tts" };
+    
+    console.log(`[TTS API Dispatch] Instantiating speech path for scene: ${sceneMatched.scene_id}`);
+    const audioPath = await generateLocalTTS(
+      project.project_id,
+      sceneMatched.scene_id,
+      voText,
+      ttsConfig
+    );
+    
+    sceneMatched.audio_path = audioPath;
     sceneMatched.vo = voText;
-    sceneMatched.status = "completed";
+    sceneMatched.tts_status = "completed";
+    sceneMatched.error = null;
     
     projects[idx] = project;
     writeProjects(projects);
-    res.json({ status: "success", audio_path: "local_tts_simulation", vo: voText });
+    res.json({ status: "success", audio_path: audioPath, vo: voText });
   } catch (error: any) {
+    console.error("TTS audio generation failed:", error);
+    sceneMatched.tts_status = "failed";
+    sceneMatched.error = error.message;
+    writeProjects(projects);
     res.status(500).json({ error: error.message });
+  }
+});
+
+// 13b. Local LTX-Video generator endpoint
+app.post("/api/projects/:id/scenes/:scene_id/video", async (req, res) => {
+  const { custom_prompt } = req.body;
+  const projects = readProjects();
+  const idx = projects.findIndex((p) => p.project_id === req.params.id);
+  if (idx === -1) return res.status(404).json({ error: "Project not found" });
+  
+  const project = projects[idx];
+  if (!project.storyboard) return res.status(400).json({ error: "No storyboard found inside project." });
+  
+  let sceneMatched: any = null;
+  project.storyboard.parts.forEach((part: any) => {
+    const sc = part.scenes.find((s: any) => s.scene_id === req.params.scene_id);
+    if (sc) sceneMatched = sc;
+  });
+  
+  if (!sceneMatched) return res.status(404).json({ error: "Scene not found in storyboard." });
+  
+  try {
+    sceneMatched.video_status = "generating";
+    writeProjects(projects);
+    
+    const providers = readProviders();
+    const vConfig = providers.video || { provider: "ltx_comfy", base_url: "http://127.0.0.1:9200", model: "comfy-ltxv-i2v" };
+    
+    const activePrompt = custom_prompt || sceneMatched.motion_prompt || "subtle camera push-in, natural breathing motion, small head movement, slight cloth movement, stable anatomy, no scene change";
+    const imagePath = sceneMatched.image_path || "";
+    
+    console.log(`[Video API Dispatch] Instantiating LTX video for scene: ${sceneMatched.scene_id}`);
+    const videoPath = await generateLocalVideo(
+      project.project_id,
+      sceneMatched.scene_id,
+      imagePath,
+      activePrompt,
+      vConfig
+    );
+    
+    if (videoPath) {
+      sceneMatched.video_path = videoPath;
+      sceneMatched.video_status = "completed";
+      sceneMatched.error = null;
+    } else {
+      sceneMatched.video_path = "";
+      sceneMatched.video_status = "failed";
+      sceneMatched.error = "LTX-Video returned empty file or is offline.";
+    }
+    
+    projects[idx] = project;
+    writeProjects(projects);
+    res.json({ status: "success", video_path: videoPath });
+  } catch (err: any) {
+    console.error("Video clip generation failed:", err);
+    sceneMatched.video_status = "failed";
+    sceneMatched.error = err.message;
+    writeProjects(projects);
+    res.status(500).json({ error: err.message });
   }
 });
 
@@ -1003,8 +1160,8 @@ app.post("/api/projects/:id/update", (req, res) => {
   res.json(projects[idx]);
 });
 
-// 15. Render final project simulation
-app.post("/api/projects/:id/render", (req, res) => {
+// 15. Render final project using FFmpeg Concat & Slideshow looping
+app.post("/api/projects/:id/render", async (req, res) => {
   const { subtitle_style } = req.body;
   const projects = readProjects();
   const idx = projects.findIndex((p) => p.project_id === req.params.id);
@@ -1013,12 +1170,312 @@ app.post("/api/projects/:id/render", (req, res) => {
   const project = projects[idx];
   project.subtitle_style = subtitle_style || project.subtitle_style;
   project.status = "rendered";
-  project.final_video_path = "final_output_render_simulated";
   project.updated_at = new Date().toISOString();
   
-  projects[idx] = project;
-  writeProjects(projects);
-  res.json(project);
+  try {
+    console.log(`[Renderer Path] Running real FFmpeg synthesis for project: ${project.project_id}`);
+    const finalVideoPath = await renderCompilation(project.project_id, project.storyboard);
+    project.final_video_path = finalVideoPath;
+    
+    projects[idx] = project;
+    writeProjects(projects);
+    res.json(project);
+  } catch (err: any) {
+    console.error("[Renderer Failed] compilation failed:", err);
+    project.final_video_path = "";
+    project.status = "failed";
+    projects[idx] = project;
+    writeProjects(projects);
+    res.status(500).json({ error: `Render gagal: ${err.message}` });
+  }
+});
+
+// === JOBS STORAGE FOR BATCH PIPE RUNS ===
+const jobs: Record<string, { 
+  status: "pending" | "running" | "completed" | "failed", 
+  progress: number, 
+  total: number, 
+  completed: number, 
+  error: string | null 
+}> = {};
+
+// Get status of a background task
+app.get("/api/jobs/:jobId", (req, res) => {
+  const job = jobs[req.params.jobId];
+  if (!job) return res.status(404).json({ error: "Job-id tidak ditemukan." });
+  res.json(job);
+});
+
+// Individual Scene Asset Pipeline Regenerator
+app.post("/api/projects/:id/scenes/:scene_id/regenerate", async (req, res) => {
+  const { type, custom_prompt } = req.body; // type can be "image", "video", "tts", "all"
+  const projects = readProjects();
+  const idx = projects.findIndex((p) => p.project_id === req.params.id);
+  if (idx === -1) return res.status(404).json({ error: "Project not found" });
+  
+  const project = projects[idx];
+  if (!project.storyboard) return res.status(400).json({ error: "Storyboard belum dibuat." });
+  
+  let sceneMatched: any = null;
+  project.storyboard.parts.forEach((p: any) => {
+    const sc = p.scenes.find((s: any) => s.scene_id === req.params.scene_id);
+    if (sc) sceneMatched = sc;
+  });
+  
+  if (!sceneMatched) return res.status(404).json({ error: "Scene not found" });
+  
+  const providers = readProviders();
+  
+  try {
+    if (type === "image" || type === "all") {
+      sceneMatched.image_status = "generating";
+      writeProjects(projects);
+      const activePrompt = custom_prompt || sceneMatched.image_prompt;
+      if (providers.image && providers.image.provider === "zimage") {
+        sceneMatched.image_path = await generateLocalImage(project.project_id, sceneMatched.scene_id, activePrompt, providers.image);
+        sceneMatched.image_status = "completed";
+      } else {
+        sceneMatched.image_path = getUnsplashFallback(activePrompt, "9:16");
+        sceneMatched.image_status = "completed";
+      }
+    }
+    
+    if (type === "tts" || type === "all") {
+      sceneMatched.tts_status = "generating";
+      writeProjects(projects);
+      if (providers.tts && providers.tts.provider === "f5tts") {
+        sceneMatched.audio_path = await generateLocalTTS(project.project_id, sceneMatched.scene_id, sceneMatched.vo, providers.tts);
+        sceneMatched.tts_status = "completed";
+      } else {
+        sceneMatched.audio_path = await generateEdgeTTS(project.project_id, sceneMatched.scene_id, sceneMatched.vo, providers.tts);
+        sceneMatched.tts_status = "completed";
+      }
+    }
+    
+    if (type === "video" || type === "all") {
+      sceneMatched.video_status = "generating";
+      writeProjects(projects);
+      const activePrompt = custom_prompt || sceneMatched.motion_prompt;
+      sceneMatched.video_path = await generateLocalVideo(project.project_id, sceneMatched.scene_id, sceneMatched.image_path, activePrompt, providers.video);
+      sceneMatched.video_status = "completed";
+    }
+    
+    sceneMatched.error = null;
+    projects[idx] = project;
+    writeProjects(projects);
+    res.json(sceneMatched);
+  } catch (err: any) {
+    sceneMatched.error = err.message;
+    writeProjects(projects);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Batch Generator: All Images
+app.post("/api/projects/:id/generate-all-images", async (req, res) => {
+  const projects = readProjects();
+  const idx = projects.findIndex((p) => p.project_id === req.params.id);
+  if (idx === -1) return res.status(404).json({ error: "Project not found" });
+  
+  const project = projects[idx];
+  if (!project.storyboard) return res.status(400).json({ error: "Storyboard belum dibuat." });
+  
+  const scenes: any[] = [];
+  project.storyboard.parts.forEach((p: any) => {
+    p.scenes.forEach((s: any) => {
+      scenes.push(s);
+    });
+  });
+  
+  const jobId = "job_img_" + Math.random().toString(36).substring(2, 9);
+  jobs[jobId] = { status: "running", progress: 0, total: scenes.length, completed: 0, error: null };
+  
+  const providers = readProviders();
+  
+  // Async sequential execution to prevent workstation crash
+  (async () => {
+    try {
+      for (const scene of scenes) {
+        scene.image_status = "generating";
+        writeProjects(projects);
+        
+        try {
+          if (providers.image && providers.image.provider === "zimage") {
+            const savedPath = await generateLocalImage(project.project_id, scene.scene_id, scene.image_prompt, providers.image);
+            if (savedPath) {
+              scene.image_path = savedPath;
+              scene.image_status = "completed";
+              scene.error = null;
+            } else {
+              throw new Error("Local image generation failed to return filepath.");
+            }
+          } else {
+            scene.image_path = getUnsplashFallback(scene.image_prompt || scene.action, "9:16");
+            scene.image_status = "completed";
+            scene.error = null;
+          }
+        } catch (err: any) {
+          scene.image_status = "failed";
+          scene.error = err.message;
+        }
+        
+        jobs[jobId].completed++;
+        jobs[jobId].progress = Math.round((jobs[jobId].completed / jobs[jobId].total) * 100);
+        writeProjects(projects);
+      }
+      jobs[jobId].status = "completed";
+    } catch (err: any) {
+      jobs[jobId].status = "failed";
+      jobs[jobId].error = err.message;
+    }
+  })();
+  
+  res.json({ job_id: jobId });
+});
+
+// Batch Generator: All Videos
+app.post("/api/projects/:id/generate-all-videos", async (req, res) => {
+  const projects = readProjects();
+  const idx = projects.findIndex((p) => p.project_id === req.params.id);
+  if (idx === -1) return res.status(404).json({ error: "Project not found" });
+  
+  const project = projects[idx];
+  if (!project.storyboard) return res.status(400).json({ error: "Storyboard belum dibuat." });
+  
+  const scenes: any[] = [];
+  project.storyboard.parts.forEach((p: any) => {
+    p.scenes.forEach((s: any) => {
+      scenes.push(s);
+    });
+  });
+  
+  const jobId = "job_vid_" + Math.random().toString(36).substring(2, 9);
+  jobs[jobId] = { status: "running", progress: 0, total: scenes.length, completed: 0, error: null };
+  
+  const providers = readProviders();
+  
+  (async () => {
+    try {
+      for (const scene of scenes) {
+        scene.video_status = "generating";
+        writeProjects(projects);
+        
+        try {
+          const videoPrompt = scene.motion_prompt || "subtle motion, slow push-in";
+          const savedPath = await generateLocalVideo(project.project_id, scene.scene_id, scene.image_path, videoPrompt, providers.video);
+          if (savedPath) {
+            scene.video_path = savedPath;
+            scene.video_status = "completed";
+            scene.error = null;
+          } else {
+            throw new Error("Local video generation returned empty filepath.");
+          }
+        } catch (err: any) {
+          scene.video_status = "failed";
+          scene.error = err.message;
+        }
+        
+        jobs[jobId].completed++;
+        jobs[jobId].progress = Math.round((jobs[jobId].completed / jobs[jobId].total) * 100);
+        writeProjects(projects);
+      }
+      jobs[jobId].status = "completed";
+    } catch (err: any) {
+      jobs[jobId].status = "failed";
+      jobs[jobId].error = err.message;
+    }
+  })();
+  
+  res.json({ job_id: jobId });
+});
+
+// Batch Generator: All TTS Voice clips
+app.post("/api/projects/:id/generate-all-tts", async (req, res) => {
+  const projects = readProjects();
+  const idx = projects.findIndex((p) => p.project_id === req.params.id);
+  if (idx === -1) return res.status(404).json({ error: "Project not found" });
+  
+  const project = projects[idx];
+  if (!project.storyboard) return res.status(400).json({ error: "Storyboard belum dibuat." });
+  
+  const scenes: any[] = [];
+  project.storyboard.parts.forEach((p: any) => {
+    p.scenes.forEach((s: any) => {
+      scenes.push(s);
+    });
+  });
+  
+  const jobId = "job_tts_" + Math.random().toString(36).substring(2, 9);
+  jobs[jobId] = { status: "running", progress: 0, total: scenes.length, completed: 0, error: null };
+  
+  const providers = readProviders();
+  
+  (async () => {
+    try {
+      for (const scene of scenes) {
+        scene.tts_status = "generating";
+        writeProjects(projects);
+        
+        try {
+          let savedPath = "";
+          if (providers.tts && providers.tts.provider === "f5tts") {
+            savedPath = await generateLocalTTS(project.project_id, scene.scene_id, scene.vo, providers.tts);
+          } else {
+            savedPath = await generateEdgeTTS(project.project_id, scene.scene_id, scene.vo, providers.tts);
+          }
+          
+          if (savedPath) {
+            scene.audio_path = savedPath;
+            scene.tts_status = "completed";
+            scene.error = null;
+          } else {
+            throw new Error("TTS audio synthesize returned empty filepath.");
+          }
+        } catch (err: any) {
+          scene.tts_status = "failed";
+          scene.error = err.message;
+        }
+        
+        jobs[jobId].completed++;
+        jobs[jobId].progress = Math.round((jobs[jobId].completed / jobs[jobId].total) * 100);
+        writeProjects(projects);
+      }
+      jobs[jobId].status = "completed";
+    } catch (err: any) {
+      jobs[jobId].status = "failed";
+      jobs[jobId].error = err.message;
+    }
+  })();
+  
+  res.json({ job_id: jobId });
+});
+
+// Assets explorer endpoint mapping files inside output directories
+app.get("/api/projects/:id/assets", (req, res) => {
+  const pId = req.params.id;
+  const projectDir = path.join(process.cwd(), "outputs", "projects", pId);
+  const assets: Record<string, string[]> = {
+    images: [],
+    videos: [],
+    audio: [],
+    final: [],
+    subtitles: [],
+    logs: []
+  };
+  
+  if (fs.existsSync(projectDir)) {
+    const folders = ["images", "videos", "audio", "final", "subtitles", "logs"];
+    folders.forEach(f => {
+      const fPath = path.join(projectDir, f);
+      if (fs.existsSync(fPath)) {
+        try {
+          const files = fs.readdirSync(fPath);
+          assets[f] = files.filter(file => !file.startsWith(".")).map(file => `/outputs/projects/${pId}/${f}/${file}`);
+        } catch (_) {}
+      }
+    });
+  }
+  res.json(assets);
 });
 
 // 16. Get & save providers list
@@ -1032,24 +1489,129 @@ app.post("/api/providers", (req, res) => {
   res.json(req.body);
 });
 
-// 17. Test connection to a provider (local integrations Ollama, ComfyUI, etc)
+// 17. Test connection to local AI micro-providers specifically (Ollama, Z-Image, F5-TTS, ComfyUI-LTX, FFmpeg)
 app.post("/api/providers/status", async (req, res) => {
-  const { provider, base_url } = req.body;
+  const { provider, base_url, model } = req.body;
+  
+  if (provider === "ffmpeg") {
+    try {
+      execSync("ffmpeg -version", { stdio: "ignore" });
+      return res.json({ 
+        status: "connected", 
+        latency: "0ms", 
+        model_found: "ffmpeg cli", 
+        details: "FFmpeg is available on local workstation paths." 
+      });
+    } catch (_) {
+      return res.json({ 
+        status: "disconnected", 
+        error: "FFmpeg binary is missing from workstation PATH variables." 
+      });
+    }
+  }
+
+  if (provider === "edge") {
+    try {
+      const pingUrl = "https://translate.google.com/translate_tts?ie=UTF-8&tl=id&client=tw-ob&q=tes";
+      const edgeProbe = await fetch(pingUrl, { method: "GET" });
+      if (edgeProbe.ok) {
+        return res.json({ 
+          status: "connected", 
+          latency: "Cloud speed", 
+          model_found: model || "id-ID-ArdiNeural", 
+          details: "Edge-TTS (Google Translate API) is reachable and online." 
+        });
+      }
+      throw new Error(`Edge returned failed status ${edgeProbe.status}`);
+    } catch (err: any) {
+      return res.json({ 
+        status: "disconnected", 
+        error: `Edge-TTS unreachable: ${err.message}` 
+      });
+    }
+  }
+
   if (!base_url) {
     return res.json({ status: "disconnected", error: "Connection URL not defined" });
   }
   
+  console.log(`[Provider Status Tester] Rigorous verification for: ${provider} on ${base_url}`);
+  
   try {
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 2000); // 2 second timeout
+    const cleanUrl = base_url.replace(/\/+$/, "");
     
-    await fetch(base_url, { signal: controller.signal });
-    clearTimeout(timeoutId);
-    res.json({ status: "connected" });
+    if (provider === "ollama") {
+      const resp = await fetch(`${cleanUrl}/models`);
+      if (resp.ok) {
+        return res.json({ 
+          status: "connected", 
+          model_found: model || "qwen3:8b", 
+          details: "Ollama /v1/models is active and responsive." 
+        });
+      }
+      throw new Error(`Ollama returned status ${resp.status}`);
+    } else if (provider === "zimage") {
+      // Test models
+      const mResp = await fetch(`${cleanUrl}/models`);
+      if (!mResp.ok) throw new Error(`Z-Image models list unreachable (${mResp.status})`);
+      
+      // Prompt probe
+      const genResp = await fetch(`${cleanUrl}/images/generations`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          model: model || "z-image-turbo",
+          prompt: "test image, simple object, white background",
+          size: "256x256",
+          n: 1
+        })
+      });
+      if (genResp.ok) {
+        return res.json({ 
+          status: "connected", 
+          model_found: model || "z-image-turbo", 
+          details: "Z-Image connected. Models and draft generators validated successfully." 
+        });
+      }
+      throw new Error(`Z-Image generations endpoint failing with status ${genResp.status}`);
+    } else if (provider === "ltx" || provider === "ltx_comfy") {
+      const resp = await fetch(`${cleanUrl}/models`);
+      if (resp.ok) {
+        return res.json({ 
+          status: "connected", 
+          model_found: model || "comfy-ltxv-i2v", 
+          details: "LTX Video dynamic proxy online." 
+        });
+      }
+      throw new Error(`LTX proxy status failed ${resp.status}`);
+    } else if (provider === "f5tts") {
+      try {
+        const respHealth = await fetch(`${cleanUrl}/health`);
+        if (respHealth.ok) {
+          return res.json({ 
+            status: "connected", 
+            model_found: "f5-tts", 
+            details: "F5-TTS local health checks validated." 
+          });
+        }
+      } catch (_) {}
+      
+      const respBase = await fetch(cleanUrl);
+      if (respBase.ok) {
+        return res.json({ 
+          status: "connected", 
+          model_found: "f5-tts", 
+          details: "F5-TTS port online." 
+        });
+      }
+      throw new Error(`F5-TTS unreachable.`);
+    } else {
+      return res.json({ status: "disconnected", error: "Unsupported provider type." });
+    }
   } catch (err: any) {
     res.json({ 
       status: "disconnected", 
-      error: "Connection failed or timed out. Feel free to use the built-in Gemini Cloud engine inside AI Studio in the meantime!" 
+      error: `Koneksi gagal: ${err.message || "Model tidak merespon di host local."}` 
     });
   }
 });

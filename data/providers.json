@@ -1,0 +1,38 @@
+{
+  "llm": {
+    "provider": "ollama",
+    "base_url": "http://127.0.0.1:11434/v1",
+    "model": "qwen3:8b",
+    "enabled": true
+  },
+  "image": {
+    "provider": "zimage",
+    "base_url": "http://127.0.0.1:9100/v1",
+    "model": "z-image-turbo",
+    "enabled": true,
+    "default_size": "768x1024",
+    "steps": 8,
+    "cfg": 1,
+    "allow_fallback": false
+  },
+  "video": {
+    "provider": "ltx",
+    "base_url": "http://127.0.0.1:9200/v1",
+    "model": "comfy-ltxv-i2v",
+    "enabled": true,
+    "duration": 3,
+    "fps": 24,
+    "resolution": "768x1024"
+  },
+  "tts": {
+    "provider": "edge",
+    "base_url": "",
+    "model": "id-ID-ArdiNeural",
+    "enabled": true
+  },
+  "render": {
+    "provider": "ffmpeg",
+    "enabled": true,
+    "output_format": "mp4"
+  }
+}

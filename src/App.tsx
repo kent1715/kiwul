@@ -13,9 +13,11 @@ import {
   Lightbulb, 
   BookOpen, 
   FileText, 
+  Clipboard,
   UserSquare, 
   TableProperties, 
   Play, 
+  MapPin,
   History, 
   CheckCircle,
   ChevronRight,
@@ -25,7 +27,8 @@ import {
   Info,
   Loader2,
   Trash2,
-  Video
+  Video,
+  FolderOpen
 } from "lucide-react";
 
 function getUnsplashFallback(query: string, ratio: string = "1:1"): string {
@@ -173,7 +176,7 @@ export const COLOR_THEMES = [
 export default function App() {
   const [projects, setProjects] = useState<Project[]>([]);
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
-  const [activeTab, setActiveTab] = useState<"ideas" | "script" | "universe" | "storyboard" | "player">("ideas");
+  const [activeTab, setActiveTab] = useState<"brief" | "ideas" | "storyline" | "script" | "characters" | "locations" | "storyboard" | "assets" | "render" | "settings">("brief");
   const [showConfig, setShowConfig] = useState(false);
   const [loading, setLoading] = useState<string | null>(null); // State representing loading process message
   const [error, setError] = useState<string | null>(null);
@@ -188,6 +191,47 @@ export default function App() {
   };
 
   const activeProject = projects.find((p) => p.project_id === selectedProjectId);
+
+  const [activeJobId, setActiveJobId] = useState<string | null>(null);
+  const [jobProgress, setJobProgress] = useState<any>(null);
+  const [projectAssets, setProjectAssets] = useState<any>(null);
+
+  const fetchProjectAssets = async () => {
+    if (!selectedProjectId) return;
+    try {
+      const res = await fetch(`/api/projects/${selectedProjectId}/assets`);
+      const data = await res.json();
+      setProjectAssets(data);
+    } catch (err) {
+      console.error("Gagal memuat daftar aset proyek:", err);
+    }
+  };
+
+  useEffect(() => {
+    if (activeTab === "assets" && selectedProjectId) {
+      fetchProjectAssets();
+    }
+  }, [activeTab, selectedProjectId, projects]);
+
+  useEffect(() => {
+    if (!activeJobId) return;
+    const timer = setInterval(async () => {
+      try {
+        const res = await fetch(`/api/jobs/${activeJobId}`);
+        if (!res.ok) throw new Error("Gagal memeriksa status task.");
+        const data = await res.json();
+        setJobProgress(data);
+        if (data.status === "completed" || data.status === "failed") {
+          setActiveJobId(null);
+          await fetchProjects();
+        }
+      } catch (err) {
+        console.error(err);
+        setActiveJobId(null);
+      }
+    }, 1500);
+    return () => clearInterval(timer);
+  }, [activeJobId]);
 
   useEffect(() => {
     fetchProjects();
@@ -214,7 +258,7 @@ export default function App() {
 
   const handleSelectProject = (id: string) => {
     setSelectedProjectId(id);
-    setActiveTab("ideas");
+    setActiveTab("brief");
     setShowConfig(false);
   };
 
@@ -231,7 +275,7 @@ export default function App() {
       const created = await res.json();
       setProjects(prev => [...prev, created]);
       setSelectedProjectId(created.project_id);
-      setActiveTab("ideas");
+      setActiveTab("brief");
     } catch (err: any) {
       setError(err.message);
     } finally {
@@ -459,6 +503,9 @@ export default function App() {
   const handleRegenerateSceneImage = async (sceneId: string, customPrompt?: string) => {
     if (!selectedProjectId) return;
     try {
+      // Optimistically show generating state
+      handleUpdateScene(sceneId, { image_status: "generating" });
+      
       const res = await fetch(`/api/projects/${selectedProjectId}/scenes/${sceneId}/image`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -466,11 +513,14 @@ export default function App() {
       });
       if (res.ok) {
         const data = await res.json();
-        // Update local path state
-        handleUpdateScene(sceneId, { image_path: data.image_path, status: "completed" });
+        handleUpdateScene(sceneId, { image_path: data.image_path, image_status: "completed", error: null });
+      } else {
+        const errorText = await res.text();
+        handleUpdateScene(sceneId, { image_status: "failed", error: `Visual error: ${errorText || "API call failed"}` });
       }
-    } catch (err) {
+    } catch (err: any) {
       console.error(err);
+      handleUpdateScene(sceneId, { image_status: "failed", error: err.message });
     }
   };
 
@@ -478,6 +528,9 @@ export default function App() {
   const handleRegenerateSceneVoice = async (sceneId: string, customVO?: string) => {
     if (!selectedProjectId) return;
     try {
+      // Optimistically show generating state
+      handleUpdateScene(sceneId, { tts_status: "generating" });
+      
       const res = await fetch(`/api/projects/${selectedProjectId}/scenes/${sceneId}/tts`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -485,10 +538,39 @@ export default function App() {
       });
       if (res.ok) {
         const data = await res.json();
-        handleUpdateScene(sceneId, { vo: data.vo, audio_path: data.audio_path });
+        handleUpdateScene(sceneId, { vo: data.vo, audio_path: data.audio_path, tts_status: "completed", error: null });
+      } else {
+        const errorText = await res.text();
+        handleUpdateScene(sceneId, { tts_status: "failed", error: `Speech error: ${errorText || "API call failed"}` });
       }
-    } catch (err) {
+    } catch (err: any) {
       console.error(err);
+      handleUpdateScene(sceneId, { tts_status: "failed", error: err.message });
+    }
+  };
+
+  // Step 9b: Re-generate specific video clip per scene
+  const handleRegenerateSceneVideo = async (sceneId: string, customPrompt?: string) => {
+    if (!selectedProjectId) return;
+    try {
+      // Optimistically show generating state
+      handleUpdateScene(sceneId, { video_status: "generating" });
+      
+      const res = await fetch(`/api/projects/${selectedProjectId}/scenes/${sceneId}/video`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ custom_prompt: customPrompt })
+      });
+      if (res.ok) {
+        const data = await res.json();
+        handleUpdateScene(sceneId, { video_path: data.video_path, video_status: "completed", error: null });
+      } else {
+        const errorText = await res.text();
+        handleUpdateScene(sceneId, { video_status: "failed", error: `Video error: ${errorText || "API call failed"}` });
+      }
+    } catch (err: any) {
+      console.error(err);
+      handleUpdateScene(sceneId, { video_status: "failed", error: err.message });
     }
   };
 
@@ -669,61 +751,100 @@ export default function App() {
             </div>
 
             {/* Stepped Workspace Tabs */}
-            <div className="flex border-b border-zinc-800 text-xs font-semibold tracking-tight overflow-x-auto scrollbar-none">
+            <div className="flex border-b border-zinc-800 text-xs font-semibold tracking-tight overflow-x-auto scrollbar-none bg-zinc-950/20 p-1 rounded-t-xl gap-1">
+              <button 
+                onClick={() => setActiveTab("brief")}
+                className={`py-2 px-4 rounded-lg hover:text-white transition flex items-center gap-1.5 cursor-pointer shrink-0 ${activeTab === "brief" ? 'bg-amber-500/10 text-amber-400 border border-amber-900/40 font-bold' : 'border border-transparent text-zinc-500 hover:bg-zinc-900/40'}`}
+                id="tab-btn-brief"
+              >
+                <Clipboard size={14} className={activeTab === "brief" ? "text-amber-400" : ""} />
+                1. Brief Normalizer
+              </button>
               <button 
                 onClick={() => setActiveTab("ideas")}
-                className={`py-3 px-5 border-b-2 hover:text-white transition flex items-center gap-1.5 cursor-pointer shrink-0 ${activeTab === "ideas" ? 'border-accent text-white bg-accent-very-subtle' : 'border-transparent text-zinc-500'}`}
+                className={`py-2 px-4 rounded-lg hover:text-white transition flex items-center gap-1.5 cursor-pointer shrink-0 ${activeTab === "ideas" ? 'bg-amber-500/10 text-amber-400 border border-amber-900/40 font-bold' : 'border border-transparent text-zinc-500 hover:bg-zinc-900/40'}`}
                 id="tab-btn-ideas"
               >
-                <Lightbulb size={14} className={activeTab === "ideas" ? "text-accent" : ""} />
-                1-2. Ide & Storyline
+                <Lightbulb size={14} className={activeTab === "ideas" ? "text-amber-400" : ""} />
+                2. Ide Konten
+              </button>
+              <button 
+                onClick={() => setActiveTab("storyline")}
+                className={`py-2 px-4 rounded-lg hover:text-white transition flex items-center gap-1.5 cursor-pointer shrink-0 ${activeTab === "storyline" ? 'bg-amber-500/10 text-amber-400 border border-amber-900/40 font-bold' : 'border border-transparent text-zinc-500 hover:bg-zinc-900/40'}`}
+                id="tab-btn-storyline"
+              >
+                <Flame size={14} className={activeTab === "storyline" ? "text-amber-400" : ""} />
+                3. Storyline
               </button>
               <button 
                 onClick={() => setActiveTab("script")}
-                className={`py-3 px-5 border-b-2 hover:text-white transition flex items-center gap-1.5 cursor-pointer shrink-0 ${activeTab === "script" ? 'border-accent text-white bg-accent-very-subtle' : 'border-transparent text-zinc-500'}`}
+                className={`py-2 px-4 rounded-lg hover:text-white transition flex items-center gap-1.5 cursor-pointer shrink-0 ${activeTab === "script" ? 'bg-amber-500/10 text-amber-400 border border-amber-900/40 font-bold' : 'border border-transparent text-zinc-500 hover:bg-zinc-900/40'}`}
                 id="tab-btn-script"
               >
-                <FileText size={14} className={activeTab === "script" ? "text-accent" : ""} />
-                3. Naskah/Script
+                <FileText size={14} className={activeTab === "script" ? "text-amber-400" : ""} />
+                4. Script Naskah
               </button>
               <button 
-                onClick={() => setActiveTab("universe")}
-                className={`py-3 px-5 border-b-2 hover:text-white transition flex items-center gap-1.5 cursor-pointer shrink-0 ${activeTab === "universe" ? 'border-accent text-white bg-accent-very-subtle' : 'border-transparent text-zinc-500'}`}
-                id="tab-btn-universe"
+                onClick={() => setActiveTab("characters")}
+                className={`py-2 px-4 rounded-lg hover:text-white transition flex items-center gap-1.5 cursor-pointer shrink-0 ${activeTab === "characters" ? 'bg-amber-500/10 text-amber-400 border border-amber-900/40 font-bold' : 'border border-transparent text-zinc-500 hover:bg-zinc-900/40'}`}
+                id="tab-btn-characters"
               >
-                <UserSquare size={14} className={activeTab === "universe" ? "text-accent" : ""} />
-                4. Universe Bible
+                <UserSquare size={14} className={activeTab === "characters" ? "text-amber-400" : ""} />
+                5. Character Bible
+              </button>
+              <button 
+                onClick={() => setActiveTab("locations")}
+                className={`py-2 px-4 rounded-lg hover:text-white transition flex items-center gap-1.5 cursor-pointer shrink-0 ${activeTab === "locations" ? 'bg-amber-500/10 text-amber-400 border border-amber-900/40 font-bold' : 'border border-transparent text-zinc-500 hover:bg-zinc-900/40'}`}
+                id="tab-btn-locations"
+              >
+                <MapPin size={14} className={activeTab === "locations" ? "text-amber-400" : ""} />
+                6. Location Bible
               </button>
               <button 
                 onClick={() => setActiveTab("storyboard")}
-                className={`py-3 px-5 border-b-2 hover:text-white transition flex items-center gap-1.5 cursor-pointer shrink-0 ${activeTab === "storyboard" ? 'border-accent text-white bg-accent-very-subtle' : 'border-transparent text-zinc-500'}`}
+                className={`py-2 px-4 rounded-lg hover:text-white transition flex items-center gap-1.5 cursor-pointer shrink-0 ${activeTab === "storyboard" ? 'bg-amber-500/10 text-amber-400 border border-amber-900/40 font-bold' : 'border border-transparent text-zinc-500 hover:bg-zinc-900/40'}`}
                 id="tab-btn-storyboard"
               >
-                <TableProperties size={14} className={activeTab === "storyboard" ? "text-accent" : ""} />
-                5. Storyboard Table
+                <TableProperties size={14} className={activeTab === "storyboard" ? "text-amber-400" : ""} />
+                7. Storyboard Table
               </button>
               <button 
-                onClick={() => setActiveTab("player")}
-                className={`py-3 px-5 border-b-2 hover:text-white transition flex items-center gap-1.5 cursor-pointer shrink-0 ${activeTab === "player" ? 'border-accent text-white bg-accent-very-subtle' : 'border-transparent text-zinc-500'}`}
-                id="tab-btn-player"
+                onClick={() => setActiveTab("assets")}
+                className={`py-2 px-4 rounded-lg hover:text-white transition flex items-center gap-1.5 cursor-pointer shrink-0 ${activeTab === "assets" ? 'bg-amber-500/10 text-amber-400 border border-amber-900/40 font-bold' : 'border border-transparent text-zinc-500 hover:bg-zinc-900/40'}`}
+                id="tab-btn-assets"
               >
-                <Play size={14} className={activeTab === "player" ? "text-accent" : ""} />
-                6. 9:16 Preview Player
+                <FolderOpen size={14} className={activeTab === "assets" ? "text-amber-400" : ""} />
+                8. Assets File Explorer
+              </button>
+              <button 
+                onClick={() => setActiveTab("render")}
+                className={`py-2 px-4 rounded-lg hover:text-white transition flex items-center gap-1.5 cursor-pointer shrink-0 ${activeTab === "render" ? 'bg-amber-500/10 text-amber-400 border border-amber-900/40 font-bold' : 'border border-transparent text-zinc-500 hover:bg-zinc-900/40'}`}
+                id="tab-btn-render"
+              >
+                <Video size={14} className={activeTab === "render" ? "text-amber-400" : ""} />
+                9. Render & Play
+              </button>
+              <button 
+                onClick={() => setActiveTab("settings")}
+                className={`py-2 px-4 rounded-lg hover:text-white transition flex items-center gap-1.5 cursor-pointer shrink-0 ${activeTab === "settings" ? 'bg-amber-500/10 text-amber-400 border border-amber-900/40 font-bold' : 'border border-transparent text-zinc-500 hover:bg-zinc-900/40'}`}
+                id="tab-btn-settings"
+              >
+                <Settings size={14} className={activeTab === "settings" ? "text-amber-400" : ""} />
+                10. AI Settings
               </button>
             </div>
 
             {/* TAB CONTENTS */}
             <div className="space-y-6">
               
-              {/* === TAB 1: IDEATION === */}
-              {activeTab === "ideas" && activeProject && (
-                <div className="space-y-6">
-                  {/* === STEP 1: BRIEF NORMALIZER === */}
+              {/* === TAB 1: BRIEF NORMALIZER === */}
+              {activeTab === "brief" && activeProject && (
+                <div className="space-y-6 animate-in fade-in duration-200">
                   <div className="bg-zinc-900/40 p-6 border border-zinc-800 rounded-xl space-y-4">
                     <div className="flex justify-between items-start">
                       <div>
-                        <h4 className="text-xs font-black uppercase text-amber-400">Tahap 1: AI Project Brief Normalizer</h4>
-                        <p className="text-[10px] text-zinc-500 mt-0.5">Tulis intisari kasar ide video Anda dalam bahasa bebas. Kiwul AI Creative Director akan merapikan parameter target, niche, audiens, dan referensi visual secara otomatis!</p>
+                        <h4 className="text-xs font-black uppercase text-amber-500">Tahap 1: AI Project Brief Normalizer</h4>
+                        <p className="text-[10px] text-zinc-500 mt-0.5 font-sans">Tulis intisari kasar ide video Anda dalam bahasa bebas. Kiwul AI Creative Director akan merapikan parameter target, niche, audiens, dan referensi visual secara otomatis!</p>
                       </div>
                     </div>
                     <div className="flex flex-col md:flex-row gap-3 pt-2">
@@ -744,11 +865,28 @@ export default function App() {
                        </button>
                     </div>
                     {activeProject.raw_brief && (
-                      <div className="text-[10px] text-amber-500/80 bg-amber-950/5 border border-amber-900/10 p-2.5 rounded-lg leading-relaxed">
-                        <strong className="font-bold">Brief Terakhir Terproses:</strong> "{activeProject.raw_brief}"
+                      <div className="text-[10px] text-amber-500/80 bg-amber-95/10 border border-amber-900/10 p-2.5 rounded-lg leading-relaxed">
+                        <strong className="font-bold text-amber-400">Brief Terakhir Terproses:</strong> "{activeProject.raw_brief}"
                       </div>
                     )}
                   </div>
+
+                  <div className="flex justify-end pt-3">
+                    <button 
+                      disabled={!activeProject.raw_brief}
+                      onClick={() => setActiveTab("ideas")}
+                      className="px-6 py-2.5 bg-zinc-900 border border-zinc-800 text-zinc-250 font-bold hover:bg-zinc-850 rounded-xl text-xs flex items-center gap-1.5 hover:text-white transition disabled:opacity-40 cursor-pointer"
+                    >
+                      Menuju Langkah Ide Konten
+                      <ChevronRight size={14} />
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {/* === TAB 2: IDEATION === */}
+              {activeTab === "ideas" && activeProject && (
+                <div className="space-y-6 animate-in fade-in duration-200">
 
                   <div className="bg-zinc-900/40 p-6 border border-zinc-800 rounded-xl space-y-4">
                     <div className="flex justify-between items-start">
@@ -796,14 +934,28 @@ export default function App() {
                     )}
                   </div>
 
-                  {/* Stage 2: Storyline outline planning */}
-                  {activeProject.selected_idea_id && (
-                    <div className="bg-zinc-900/40 p-6 border border-zinc-800 rounded-xl space-y-4">
-                      <div className="flex justify-between items-start">
-                        <div>
-                          <h4 className="text-xs font-black uppercase text-zinc-400">Tahap 2: Matriks Alur Plot (Storyline)</h4>
-                          <p className="text-[10px] text-zinc-500 mt-0.5">Uraikan konsep ide terpilih menjadi rentetan arc drama, opening, middle, climax, dan visual sequence</p>
-                        </div>
+                  <div className="flex justify-end pt-3">
+                    <button 
+                      disabled={!activeProject.selected_idea_id}
+                      onClick={() => setActiveTab("storyline")}
+                      className="px-6 py-2.5 bg-zinc-900 border border-zinc-800 text-zinc-250 font-bold hover:bg-zinc-800 rounded-xl text-xs flex items-center gap-1.5 hover:text-white transition disabled:opacity-40 cursor-pointer"
+                    >
+                      Menuju Langkah Storyline
+                      <ChevronRight size={14} />
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {/* === TAB 3: STORYLINE === */}
+              {activeTab === "storyline" && activeProject && (
+                <div className="space-y-6 animate-in fade-in duration-200">
+                  <div className="bg-zinc-900/40 p-6 border border-zinc-800 rounded-xl space-y-4">
+                    <div className="flex justify-between items-start">
+                      <div>
+                        <h4 className="text-xs font-black uppercase text-zinc-400">Tahap 3: Matriks Alur Plot (Storyline)</h4>
+                        <p className="text-[10px] text-zinc-500 mt-0.5">Uraikan konsep ide terpilih menjadi rentetan arc drama, opening, middle, climax, dan visual sequence</p>
+                      </div>
                         <button 
                           onClick={handleGenerateStoryline}
                           className="flex items-center gap-1.5 px-4 py-2 bg-amber-500 hover:bg-amber-400 text-zinc-950 text-xs font-bold rounded-lg shadow shadow-amber-500/10 transition cursor-pointer font-sans"
@@ -855,8 +1007,7 @@ export default function App() {
                         </div>
                       )}
                     </div>
-                  )}
-
+                    
                   {/* Flow control next */}
                   <div className="flex justify-end pt-3">
                     <button 
@@ -944,195 +1095,510 @@ export default function App() {
                   </div>
                 </div>
               )}
-
-              {/* === TAB 3: UNIVERSE BIBLE === */}
-              {activeTab === "universe" && activeProject && (
+              {/* === TAB 5: CHARACTER BIBLE === */}
+              {activeTab === "characters" && activeProject && (
                 <div className="space-y-6">
-                  <div className="space-y-4">
-                    <div className="flex justify-between items-center bg-zinc-900/20 p-4 border border-zinc-800/80 rounded-xl">
-                      <div>
-                        <h4 className="text-xs font-black uppercase text-zinc-400">Tahap 4: Universe Bible (Aktor & Studio)</h4>
-                        <p className="text-[10px] text-zinc-500 mt-0.5">Konstruksikan karakter pemeran utama (Character Bible) dan latar belakang tempat agar konsistensi grafis di setiap scene terjaga!</p>
-                      </div>
-                      <button 
-                        onClick={handleGenerateUniverse}
-                        className="flex items-center gap-1.5 px-4 py-2 bg-amber-500 hover:bg-amber-400 text-zinc-950 text-xs font-bold rounded-lg shadow shadow-amber-500/10 transition cursor-pointer"
-                        id="btn-trigger-universe"
-                      >
-                        <Sparkles size={13} />
-                        Lahirkan Universe Baru
-                      </button>
+                  <div className="flex justify-between items-center bg-zinc-900/20 p-4 border border-zinc-800/80 rounded-xl">
+                    <div>
+                      <h4 className="text-xs font-black uppercase text-zinc-400">Tahap 5: Character Bible (Aktor Utama)</h4>
+                      <p className="text-[10px] text-zinc-500 mt-0.5">Konstruksikan karakter pemeran utama agar konsistensi grafis di setiap scene terjaga!</p>
                     </div>
-
-                    {/* Character component view */}
-                    <CharacterView 
-                      charBible={activeProject.character}
-                      onUpdate={(fields) => {
-                        const updatedChar = { ...activeProject.character!, ...fields } as CharacterBible;
-                        handleUpdateProjectField({ character: updatedChar });
-                      }}
-                      onGenerateReference={async () => {
-                        if (!activeProject.character) return;
-                        // Force change ref path as mock fallback
-                        const fallbackRef = getUnsplashFallback(activeProject.character.name || "host", "1:1");
-                        const updatedChar = { ...activeProject.character, reference_image_path: fallbackRef };
-                        await handleUpdateProjectField({ character: updatedChar });
-                      }}
-                    />
-
-                    {/* Location component view */}
-                    <LocationView 
-                      locBible={activeProject.location}
-                      onUpdate={(fields) => {
-                        const updatedLoc = { ...activeProject.location!, ...fields } as LocationBible;
-                        handleUpdateProjectField({ location: updatedLoc });
-                      }}
-                      onGenerateReference={async () => {
-                        if (!activeProject.location) return;
-                        const fallbackRef = getUnsplashFallback("kitchen", "1:1");
-                        const updatedLoc = { ...activeProject.location, reference_image_path: fallbackRef };
-                        await handleUpdateProjectField({ location: updatedLoc });
-                      }}
-                    />
+                    <button 
+                      onClick={handleGenerateUniverse}
+                      className="flex items-center gap-1.5 px-4 py-2 bg-amber-500 hover:bg-amber-400 text-zinc-950 text-xs font-bold rounded-lg shadow shadow-amber-500/10 transition cursor-pointer"
+                      id="btn-trigger-universe"
+                    >
+                      <Sparkles size={13} />
+                      Inisiasikan Universe Bible
+                    </button>
                   </div>
+
+                  <CharacterView 
+                    charBible={activeProject.character}
+                    onUpdate={(fields) => {
+                      const updatedChar = { ...activeProject.character!, ...fields } as CharacterBible;
+                      handleUpdateProjectField({ character: updatedChar });
+                    }}
+                    onGenerateReference={async () => {
+                      if (!activeProject.character) return;
+                      const fallbackRef = getUnsplashFallback(activeProject.character.name || "host", "1:1");
+                      const updatedChar = { ...activeProject.character, reference_image_path: fallbackRef };
+                      await handleUpdateProjectField({ character: updatedChar });
+                    }}
+                  />
 
                   <div className="flex justify-end pt-3">
                     <button 
-                      disabled={!activeProject.character || !activeProject.location}
-                      onClick={() => setActiveTab("storyboard")}
-                      className="px-6 py-2.5 bg-zinc-900 border border-zinc-800 text-zinc-250 font-bold hover:bg-zinc-805 rounded-xl text-xs flex items-center gap-1.5 hover:text-white transition disabled:opacity-40 cursor-pointer"
+                      disabled={!activeProject.character}
+                      onClick={() => setActiveTab("locations")}
+                      className="px-6 py-2.5 bg-zinc-900 border border-zinc-800 text-zinc-250 font-bold hover:bg-zinc-850 rounded-xl text-xs flex items-center gap-1.5 hover:text-white transition disabled:opacity-40 cursor-pointer"
                     >
-                      Menuju Langkah Penguraian Storyboard
+                      Menuju Langkah Location Bible
                       <ChevronRight size={14} />
                     </button>
                   </div>
                 </div>
               )}
 
-              {/* === TAB 4: STORYBOARD TABLE === */}
-              {activeTab === "storyboard" && activeProject && (
+              {/* === TAB 6: LOCATION BIBLE === */}
+              {activeTab === "locations" && activeProject && (
                 <div className="space-y-6">
-                  <div className="space-y-4">
-                    <div className="flex justify-between items-center bg-zinc-900/20 p-4 border border-zinc-800/80 rounded-xl">
+                  <div className="flex justify-between items-center bg-zinc-900/20 p-4 border border-zinc-800/80 rounded-xl">
+                    <div>
+                      <h4 className="text-xs font-black uppercase text-zinc-400">Tahap 6: Location Bible (Latar Belakang Scene)</h4>
+                      <p className="text-[10px] text-zinc-500 mt-0.5">Definisikan latar studio tempat syuting dan ambient pencahayaan agar render terlihat sinematik dan konsisten.</p>
+                    </div>
+                  </div>
+
+                  <LocationView 
+                    locBible={activeProject.location}
+                    onUpdate={(fields) => {
+                      const updatedLoc = { ...activeProject.location!, ...fields } as LocationBible;
+                      handleUpdateProjectField({ location: updatedLoc });
+                    }}
+                    onGenerateReference={async () => {
+                      if (!activeProject.location) return;
+                      const fallbackRef = getUnsplashFallback("kitchen", "1:1");
+                      const updatedLoc = { ...activeProject.location, reference_image_path: fallbackRef };
+                      await handleUpdateProjectField({ location: updatedLoc });
+                    }}
+                  />
+
+                  <div className="flex justify-end pt-3">
+                    <button 
+                      disabled={!activeProject.location}
+                      onClick={() => setActiveTab("storyboard")}
+                      className="px-6 py-2.5 bg-zinc-900 border border-zinc-800 text-zinc-250 font-bold hover:bg-zinc-850 rounded-xl text-xs flex items-center gap-1.5 hover:text-white transition disabled:opacity-40 cursor-pointer"
+                    >
+                      Menuju Langkah Storyboard Table
+                      <ChevronRight size={14} />
+                    </button>
+                  </div>
+                </div>
+              )}
+              {/* === TAB 7: Storyboard / AI Content Factory === */}
+              {activeTab === "storyboard" && activeProject && (
+                <div className="space-y-6 animate-in fade-in duration-200">
+                  <div className="bg-zinc-900/40 p-5 border border-zinc-800 rounded-xl space-y-4">
+                    <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
                       <div>
-                        <h4 className="text-xs font-black uppercase text-zinc-400">Tahap 5: Penguraian Storyboard Matriks</h4>
-                        <p className="text-[10px] text-zinc-500 mt-0.5">Potong naskah menjadi bagian kecil berdurasi 3-5 detik per scene. Terapkan visual deskripsi dan edit langsung di dalam tabel!</p>
+                        <h4 className="text-xs font-black uppercase text-zinc-400">Tahap 7: Storyboard & AI Content Production Factory</h4>
+                        <p className="text-[10px] text-zinc-550 mt-0.5">Disini Anda dapat mendelegasikan tugas pembuatan seluruh aset visual (Z-Image), video (LTXV I2V Proxy), dan VO (Edge-TTS) secara otomatis.</p>
                       </div>
-                      <button 
-                        onClick={handleGenerateStoryboard}
-                        className="flex items-center gap-1.5 px-4 py-2 bg-amber-500 hover:bg-amber-400 text-zinc-950 text-xs font-bold rounded-lg shadow shadow-amber-500/10 transition cursor-pointer"
-                        id="btn-trigger-storyboard"
-                      >
-                        <Sparkles size={13} />
-                        Urai Menjadi Storyboard
-                      </button>
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <button 
+                          onClick={handleGenerateStoryboard}
+                          className="flex items-center gap-1.5 px-3 py-1.5 bg-zinc-950 border border-zinc-850 hover:bg-zinc-900 text-zinc-300 text-xs font-bold rounded-lg transition cursor-pointer"
+                          id="btn-trigger-storyboard"
+                        >
+                          <Sparkles size={12} />
+                          Urai Ulang Storyboard
+                        </button>
+                      </div>
                     </div>
 
-                    {/* === STEP 13-14: AI CREATIVE DIRECTOR QC CHECKLIST & AUTO-FIX LOGS === */}
-                    {activeProject.storyboard && activeProject.qc_report && (
-                      <div className="bg-zinc-950/70 border border-zinc-800 rounded-xl p-5 space-y-4 animate-in fade-in duration-200">
-                        <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 pb-3 border-b border-zinc-900">
-                          <div>
-                            <h4 className="text-xs font-black uppercase text-amber-400 tracking-wider flex items-center gap-1.5">
-                              <CheckCircle size={14} className="text-amber-500" />
-                              AI Creative Director QC Report & Auto-Fix Log
-                            </h4>
-                            <p className="text-[10px] text-zinc-550 mt-0.5">
-                              Verifikasi otomatis asangan, hook video, spelling voiceover (TTS), dan stabilitas gerak kamera.
-                            </p>
-                          </div>
-                          <div className="flex items-center gap-4 shrink-0">
-                            <div className="text-right">
-                              <span className="text-[9px] uppercase text-zinc-500 block font-mono">Skor Kelayakan</span>
-                              <span className={`text-lg font-black font-mono leading-none ${activeProject.qc_report.qc_score >= 85 ? 'text-green-400' : 'text-amber-400'}`}>
-                                {activeProject.qc_report.qc_score}/100
-                              </span>
-                            </div>
-                            <button
-                              onClick={handleTriggerManualQC}
-                              className="px-3 py-1.5 bg-zinc-900 hover:bg-zinc-800 text-zinc-200 text-xs font-semibold rounded-lg border border-zinc-800 transition cursor-pointer"
-                              id="btn-re-evaluate-qc"
-                            >
-                              Evaluasi Ulang & Perbaiki
-                            </button>
-                          </div>
+                    {/* Batch Actions Toolbar Panel */}
+                    {activeProject.storyboard && (
+                      <div className="bg-zinc-950/80 p-4 border border-zinc-900 rounded-lg flex flex-col lg:flex-row justify-between items-start lg:items-center gap-4">
+                        <div className="space-y-0.5">
+                          <span className="text-[10px] font-black uppercase text-amber-500 tracking-wider font-mono">⚡ Batch Automation Controls:</span>
+                          <p className="text-[10px] text-zinc-500">Jalankan generasi massal berurutan agar GPU Anda tetap stabil.</p>
                         </div>
-
-                        {activeProject.qc_report.feedback_general && (
-                          <div className="text-xs bg-zinc-950 p-3 rounded-lg border border-zinc-900 italic text-zinc-400 leading-relaxed">
-                            "{activeProject.qc_report.feedback_general}"
-                          </div>
-                        )}
-
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
-                          {/* Checklist */}
-                          <div className="space-y-2 bg-zinc-950/50 p-4 border border-zinc-900 rounded-lg">
-                            <span className="text-[9px] font-bold text-zinc-500 uppercase font-mono tracking-wider block">Hasil Pemeriksaan Standar</span>
-                            <div className="space-y-1.5 mt-2">
-                              {activeProject.qc_report.checklist?.map((item, idx) => (
-                                <div key={idx} className="flex justify-between items-start gap-3 bg-zinc-950 p-2 rounded border border-zinc-900/50">
-                                  <div className="space-y-0.5">
-                                    <span className="text-[11px] text-zinc-300 font-semibold">{item.criteria}</span>
-                                    <span className="text-[9px] text-zinc-500 block leading-tight">{item.notes}</span>
-                                  </div>
-                                  <span className={`px-1.5 py-0.2 rounded text-[8px] font-mono font-bold shrink-0 ${item.passed ? 'bg-green-950/50 text-green-400 border border-green-900/40' : 'bg-red-950/50 text-red-400 border border-red-900/40'}`}>
-                                    {item.passed ? 'LULUS' : 'GAGAL'}
-                                  </span>
-                                </div>
-                              ))}
-                            </div>
-                          </div>
-
-                          {/* Fix logs */}
-                          <div className="space-y-2 bg-zinc-950/50 p-4 border border-zinc-900 rounded-lg">
-                            <span className="text-[9px] font-bold text-zinc-500 uppercase font-mono tracking-wider block">Log Auto-Fix AI Director</span>
-                            <div className="space-y-1.5 mt-2 overflow-y-auto max-h-[180px] pr-1">
-                              {activeProject.qc_report.auto_fixed_logs && activeProject.qc_report.auto_fixed_logs.length > 0 ? (
-                                activeProject.qc_report.auto_fixed_logs.map((logStr, idx) => (
-                                  <div key={idx} className="bg-amber-950/10 p-2 rounded border border-amber-900/10 text-[10px] text-amber-300/85 leading-relaxed flex gap-2">
-                                    <span className="text-amber-500 font-bold font-mono">✓</span>
-                                    <span>{logStr}</span>
-                                  </div>
-                                ))
-                              ) : (
-                                <div className="text-[10px] text-zinc-500 font-mono italic p-2 text-center">
-                                  Tidak ada perbaikan yang perlu diterapkan. Storyboard prima.
-                                </div>
-                              )}
-                            </div>
-                          </div>
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <button
+                            onClick={async () => {
+                              try {
+                                const res = await fetch(`/api/projects/${selectedProjectId}/generate-all-images`, { method: "POST" });
+                                const data = await res.json();
+                                if (data.job_id) {
+                                  setActiveJobId(data.job_id);
+                                  setJobProgress({ status: "running", progress: 0, total: 0, completed: 0 });
+                                }
+                              } catch (err: any) {
+                                setError(`Generasi massal gambar gagal dipicu: ${err.message}`);
+                              }
+                            }}
+                            disabled={!!activeJobId}
+                            className="bg-amber-400 hover:bg-amber-500 text-zinc-950 px-3.5 py-1.5 rounded-lg text-[10px] font-black font-mono transition cursor-pointer disabled:opacity-40"
+                          >
+                            Generate All Images (Z-Image)
+                          </button>
+                          <button
+                            onClick={async () => {
+                              try {
+                                const res = await fetch(`/api/projects/${selectedProjectId}/generate-all-tts`, { method: "POST" });
+                                const data = await res.json();
+                                if (data.job_id) {
+                                  setActiveJobId(data.job_id);
+                                  setJobProgress({ status: "running", progress: 0, total: 0, completed: 0 });
+                                }
+                              } catch (err: any) {
+                                setError(`Generasi massal TTS gagal divalidasi: ${err.message}`);
+                              }
+                            }}
+                            disabled={!!activeJobId}
+                            className="bg-zinc-900 hover:bg-zinc-800 border border-zinc-800 text-zinc-300 px-3.5 py-1.5 rounded-lg text-[10px] font-black font-mono transition cursor-pointer disabled:opacity-40"
+                          >
+                            Generate All VO (Edge/F5)
+                          </button>
+                          <button
+                            onClick={async () => {
+                              try {
+                                const res = await fetch(`/api/projects/${selectedProjectId}/generate-all-videos`, { method: "POST" });
+                                const data = await res.json();
+                                if (data.job_id) {
+                                  setActiveJobId(data.job_id);
+                                  setJobProgress({ status: "running", progress: 0, total: 0, completed: 0 });
+                                }
+                              } catch (err: any) {
+                                setError(`Generasi massal video gagal dipicu: ${err.message}`);
+                              }
+                            }}
+                            disabled={!!activeJobId}
+                            className="bg-zinc-900 hover:bg-zinc-800 border border-zinc-800 text-zinc-300 px-3.5 py-1.5 rounded-lg text-[10px] font-black font-mono transition cursor-pointer disabled:opacity-40"
+                          >
+                            Generate All Videos (LTXV)
+                          </button>
                         </div>
                       </div>
                     )}
 
-                    <StoryboardView 
-                      storyboard={activeProject.storyboard}
-                      onUpdateScene={handleUpdateScene}
-                      onRegenerateImage={handleRegenerateSceneImage}
-                      onRegenerateVoice={handleRegenerateSceneVoice}
-                      onPreviewScene={(scene) => {
-                        setActiveTab("player");
-                      }}
-                    />
+                    {/* Batch progress status panel */}
+                    {activeJobId && jobProgress && (
+                      <div className="bg-amber-950/15 border border-amber-900/30 p-3.5 rounded-lg space-y-2 animate-pulse">
+                        <div className="flex justify-between text-[10px] text-amber-400 font-mono font-bold">
+                          <span>PROSES MASAL BERJALAN: {activeJobId.replace("job_", "").toUpperCase()}</span>
+                          <span>{jobProgress.completed} / {jobProgress.total} Selesai ({jobProgress.progress}%)</span>
+                        </div>
+                        <div className="w-full bg-zinc-950 h-2 rounded-full overflow-hidden">
+                          <div 
+                            className="bg-amber-500 h-full rounded-full transition-all duration-300"
+                            style={{ width: `${jobProgress.progress}%` }}
+                          />
+                        </div>
+                      </div>
+                    )}
                   </div>
+
+                  {activeProject.storyboard ? (
+                    <div className="space-y-6">
+                      {/* QC Checklist reports */}
+                      {activeProject.qc_report && (
+                        <div className="bg-zinc-950/80 border border-zinc-850 rounded-xl p-5 space-y-4">
+                          <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 pb-3 border-b border-zinc-900">
+                            <div>
+                              <h4 className="text-xs font-black uppercase text-amber-400 tracking-wider flex items-center gap-1.5">
+                                <CheckCircle size={14} className="text-amber-500" />
+                                AI Creative Director QC Report & Auto-Fix Log
+                              </h4>
+                              <p className="text-[10px] text-zinc-500 mt-0.5">
+                                Verifikasi otomatis asangan, hook video, spelling voiceover (TTS), dan stabilitas gerak kamera.
+                              </p>
+                            </div>
+                            <div className="flex items-center gap-4 shrink-0">
+                              <div className="text-right font-mono">
+                                <span className="text-[9px] uppercase text-zinc-500 block">Score</span>
+                                <span className="text-lg font-black text-amber-400">
+                                  {activeProject.qc_report.qc_score}/100
+                                </span>
+                              </div>
+                              <button
+                                onClick={handleTriggerManualQC}
+                                className="px-3 py-1.5 bg-zinc-900 hover:bg-zinc-800 text-zinc-200 text-xs font-semibold rounded-lg border border-zinc-800 transition cursor-pointer"
+                                id="btn-re-evaluate-qc"
+                              >
+                                Evaluasi Ulang & Perbaiki
+                              </button>
+                            </div>
+                          </div>
+
+                          {activeProject.qc_report.feedback_general && (
+                            <div className="text-xs bg-zinc-950 p-3 rounded-lg border border-zinc-900 italic text-zinc-400 leading-relaxed font-sans">
+                              "{activeProject.qc_report.feedback_general}"
+                            </div>
+                          )}
+
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
+                            {/* Checklist */}
+                            <div className="space-y-2 bg-zinc-950/50 p-4 border border-zinc-900 rounded-lg">
+                              <span className="text-[9px] font-bold text-zinc-500 uppercase font-mono block">Hasil Pemeriksaan Standar</span>
+                              <div className="space-y-1.5 mt-2 max-h-[140px] overflow-y-auto">
+                                {activeProject.qc_report.checklist?.map((item, idx) => (
+                                  <div key={idx} className="flex justify-between items-start gap-4 bg-zinc-950 p-2 rounded border border-zinc-900/50">
+                                    <div className="space-y-0.5">
+                                      <span className="text-[11px] text-zinc-300 font-semibold">{item.criteria}</span>
+                                      <span className="text-[9px] text-zinc-500 block leading-tight">{item.notes}</span>
+                                    </div>
+                                    <span className={`px-1.5 py-0.2 rounded text-[8px] font-mono font-bold shrink-0 ${item.passed ? 'bg-green-950/50 text-green-400 border border-green-905/30' : 'bg-red-950/50 text-red-400 border border-red-905/30'}`}>
+                                      {item.passed ? 'LULUS' : 'GAGAL'}
+                                    </span>
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+
+                            {/* Fix logs */}
+                            <div className="space-y-2 bg-zinc-950/50 p-4 border border-zinc-900 rounded-lg">
+                              <span className="text-[9px] font-bold text-zinc-500 uppercase font-mono block">Log Auto-Fix AI Director</span>
+                              <div className="space-y-1.5 mt-2 overflow-y-auto max-h-[140px] pr-1">
+                                {activeProject.qc_report.auto_fixed_logs && activeProject.qc_report.auto_fixed_logs.length > 0 ? (
+                                  activeProject.qc_report.auto_fixed_logs.map((logStr, idx) => (
+                                    <div key={idx} className="bg-amber-95/10 p-2 rounded border border-amber-900/10 text-[10px] text-amber-300 leading-relaxed flex gap-2">
+                                      <span className="text-amber-500 font-bold font-mono">✓</span>
+                                      <span>{logStr}</span>
+                                    </div>
+                                  ))
+                                ) : (
+                                  <div className="text-[10px] text-zinc-500 font-mono italic p-2 text-center">
+                                    Tidak ada perbaikan yang perlu diterapkan. Storyboard prima.
+                                  </div>
+                                )}
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      )}
+
+                      <StoryboardView 
+                        storyboard={activeProject.storyboard}
+                        onUpdateScene={handleUpdateScene}
+                        onRegenerateImage={handleRegenerateSceneImage}
+                        onRegenerateVoice={handleRegenerateSceneVoice}
+                        onRegenerateVideo={handleRegenerateSceneVideo}
+                        onPreviewScene={(scene) => {
+                          setActiveTab("render");
+                        }}
+                      />
+                    </div>
+                  ) : (
+                    <div className="py-20 text-center border border-zinc-850 border-dashed rounded-xl bg-zinc-950/20 text-zinc-500 text-xs">
+                      Matriks storyboard kosong. Klik Urai Ulang Storyboard di kanan atas untuk memulai.
+                    </div>
+                  )}
 
                   <div className="flex justify-end pt-3">
                     <button 
                       disabled={!activeProject.storyboard}
-                      onClick={() => setActiveTab("player")}
-                      className="px-6 py-2.5 bg-amber-500 border border-amber-400 text-zinc-950 font-bold hover:bg-amber-450 hover:text-zinc-950 rounded-xl text-xs flex items-center gap-1.5 shadow-lg shadow-amber-500/20 transition disabled:opacity-40 cursor-pointer"
+                      onClick={() => setActiveTab("assets")}
+                      className="px-6 py-2.5 bg-zinc-900 border border-zinc-800 text-zinc-200 font-bold hover:bg-zinc-805 rounded-xl text-xs flex items-center gap-1.5 transition disabled:opacity-40 cursor-pointer"
                     >
-                      Masuk ke Layout Video Player
+                      Buka Local Assets Explorer
                       <ChevronRight size={14} />
                     </button>
                   </div>
                 </div>
               )}
 
-              {/* === TAB 5: PREVIEW PLAYER === */}
-              {activeTab === "player" && activeProject && (
-                <div className="space-y-6">
-                  <PreviewPlayer project={activeProject} />
+              {/* === TAB 8: ASSETS EXPLORER === */}
+              {activeTab === "assets" && activeProject && (
+                <div className="space-y-6 animate-in fade-in duration-200">
+                  <div className="bg-zinc-900/40 p-6 border border-zinc-800 rounded-xl space-y-4">
+                    <div className="flex justify-between items-center pb-2 border-b border-zinc-800">
+                      <div>
+                        <h4 className="text-xs font-black uppercase text-zinc-400">Tahap 8: Local Project Assets File Explorer</h4>
+                        <p className="text-[10px] text-zinc-500 mt-0.5 font-sans">Penelusuran direktori output lokal PC secara real-time. Semua aset disimpan dalam sub-folder proyek `{activeProject.project_id}`.</p>
+                      </div>
+                      <button 
+                        onClick={fetchProjectAssets}
+                        className="px-3 py-1.5 bg-zinc-900 hover:bg-zinc-850 text-zinc-350 hover:text-white text-[11px] font-bold rounded-lg border border-zinc-800 cursor-pointer transition"
+                      >
+                        Segarkan Files
+                      </button>
+                    </div>
+
+                    {projectAssets ? (
+                      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 pt-2">
+                        {/* Images folder */}
+                        <div className="bg-zinc-950 p-4 rounded-xl border border-zinc-900 space-y-3">
+                          <div className="flex justify-between items-center text-[10px] font-black uppercase tracking-wider text-amber-500 border-b border-zinc-900 pb-2">
+                            <span>🖼️ Images Folder</span>
+                            <span className="font-mono text-[9px] bg-zinc-900 px-1.5 rounded text-zinc-400">{projectAssets.images?.length || 0} files</span>
+                          </div>
+                          <div className="max-h-60 overflow-y-auto space-y-2 pr-1">
+                            {projectAssets.images && projectAssets.images.length > 0 ? (
+                              projectAssets.images.map((path: string, i: number) => (
+                                <a 
+                                  key={i} 
+                                  href={path} 
+                                  target="_blank" 
+                                  referrerPolicy="no-referrer" 
+                                  className="block p-1.5 bg-zinc-900 border border-zinc-850 rounded hover:border-amber-400 transition"
+                                >
+                                  <img src={path} referrerPolicy="no-referrer" className="w-full h-24 object-cover rounded mb-1.5" />
+                                  <span className="font-mono text-[9px] block text-zinc-500 truncate">{path.split("/").pop()}</span>
+                                </a>
+                              ))
+                            ) : (
+                              <p className="text-[10px] text-zinc-650 italic text-center py-4">Belum ada file gambar digenerasikan.</p>
+                            )}
+                          </div>
+                        </div>
+
+                        {/* Audio TTS folder */}
+                        <div className="bg-zinc-950 p-4 rounded-xl border border-zinc-900 space-y-3">
+                          <div className="flex justify-between items-center text-[10px] font-black uppercase tracking-wider text-amber-500 border-b border-zinc-900 pb-2">
+                            <span>🔊 Audio TTS Folder</span>
+                            <span className="font-mono text-[9px] bg-zinc-900 px-1.5 rounded text-zinc-400">{projectAssets.audio?.length || 0} files</span>
+                          </div>
+                          <div className="max-h-60 overflow-y-auto space-y-2 pr-1">
+                            {projectAssets.audio && projectAssets.audio.length > 0 ? (
+                              projectAssets.audio.map((path: string, i: number) => (
+                                <div key={i} className="p-2 bg-zinc-900 border border-zinc-850 rounded space-y-1.5">
+                                  <span className="font-mono text-[9px] block text-zinc-450 truncate">{path.split("/").pop()}</span>
+                                  <audio src={path} controls className="w-full h-8 bg-zinc-950 rounded" />
+                                </div>
+                              ))
+                            ) : (
+                              <p className="text-[10px] text-zinc-650 italic text-center py-4">Belum ada file suara TTS disintesis.</p>
+                            )}
+                          </div>
+                        </div>
+
+                        {/* Videos folder */}
+                        <div className="bg-zinc-950 p-4 rounded-xl border border-zinc-900 space-y-3">
+                          <div className="flex justify-between items-center text-[10px] font-black uppercase tracking-wider text-amber-500 border-b border-zinc-900 pb-2">
+                            <span>🎥 Generated Clips</span>
+                            <span className="font-mono text-[9px] bg-zinc-900 px-1.5 rounded text-zinc-400">{projectAssets.videos?.length || 0} files</span>
+                          </div>
+                          <div className="max-h-60 overflow-y-auto space-y-2 pr-1">
+                            {projectAssets.videos && projectAssets.videos.length > 0 ? (
+                              projectAssets.videos.map((path: string, i: number) => (
+                                <a 
+                                  key={i} 
+                                  href={path} 
+                                  target="_blank" 
+                                  className="block p-1.5 bg-zinc-900 border border-zinc-850 rounded hover:border-amber-400 transition"
+                                >
+                                  <video src={path} className="w-full h-24 object-cover rounded mb-1" muted loop onMouseEnter={(e) => e.currentTarget.play()} onMouseLeave={(e) => e.currentTarget.pause()} />
+                                  <span className="font-mono text-[9px] block text-zinc-500 truncate">{path.split("/").pop()}</span>
+                                </a>
+                              ))
+                            ) : (
+                              <p className="text-[10px] text-zinc-650 italic text-center py-4">Belum ada video clip diproduksi.</p>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="py-20 text-center text-zinc-500 border border-dashed border-zinc-800 rounded-xl bg-zinc-950/20 text-xs">
+                        Memuat data direktori file systems...
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="flex justify-end pt-3">
+                    <button 
+                      onClick={() => setActiveTab("render")}
+                      className="px-6 py-2.5 bg-zinc-900 border border-zinc-800 text-zinc-200 font-bold hover:bg-zinc-800 rounded-xl text-xs flex items-center gap-1.5 transition cursor-pointer"
+                    >
+                      Buka Render & Compilation Final
+                      <ChevronRight size={14} />
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {/* === TAB 9: COMPILATION RENDER FINAL === */}
+              {activeTab === "render" && activeProject && (
+                <div className="space-y-6 animate-in fade-in duration-200">
+                  <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                    {/* Render Controls Block */}
+                    <div className="lg:col-span-2 space-y-6">
+                      <div className="bg-zinc-900/40 p-6 border border-zinc-800 rounded-xl space-y-4">
+                        <div>
+                          <h4 className="text-xs font-black uppercase text-amber-500">Tahap 9: Real FFmpeg Video Compilation Engine</h4>
+                          <p className="text-[10px] text-zinc-500 mt-0.5 font-sans">Gabung seluruh aset visual, loop suara naratif TTS, samakan audio gain, tempel subtitle, dan render video format MP4 berdurasi penuh.</p>
+                        </div>
+
+                        {/* Subtitle style configs */}
+                        <div className="bg-zinc-950/70 border border-zinc-900 p-4 rounded-lg space-y-4 text-xs">
+                          <span className="text-[10px] font-bold text-zinc-400 uppercase block font-mono">Konfigurasi Custom Subtitle:</span>
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-1">
+                            <div>
+                              <label className="text-[10px] text-zinc-500 block mb-1">Gaya Huruf (Fontstyle)</label>
+                              <select 
+                                value={activeProject.subtitle_style?.fontname || "Impact"}
+                                onChange={(e) => {
+                                  const style = { ...activeProject.subtitle_style, fontname: e.target.value };
+                                  handleUpdateProjectField({ subtitle_style: style });
+                                }}
+                                className="w-full bg-zinc-950 border border-zinc-850 rounded p-1.5 text-zinc-300 font-mono text-[11px] focus:outline-none focus:border-amber-500 cursor-pointer"
+                              >
+                                <option value="Impact">Impact (Bold Popular)</option>
+                                <option value="Arial">Arial (Clean Classic)</option>
+                                <option value="Trebuchet MS">Trebuchet (Comic Social)</option>
+                                <option value="Courier New">Courier (Brutalist Tech)</option>
+                              </select>
+                            </div>
+                            <div>
+                              <label className="text-[10px] text-zinc-500 block mb-1">Ukuran Subtitle (Fontsize)</label>
+                              <select 
+                                value={activeProject.subtitle_style?.fontsize || 22}
+                                onChange={(e) => {
+                                  const style = { ...activeProject.subtitle_style, fontsize: Number(e.target.value) };
+                                  handleUpdateProjectField({ subtitle_style: style });
+                                }}
+                                className="w-full bg-zinc-950 border border-zinc-855 rounded p-1.5 text-zinc-300 font-mono text-[11px] focus:outline-none focus:border-amber-500 cursor-pointer"
+                              >
+                                <option value={18}>18 (Kecil)</option>
+                                <option value={22}>22 (Normal Standard)</option>
+                                <option value={26}>26 (Besar Lantang)</option>
+                                <option value={30}>30 (Ekstra Jumbo)</option>
+                              </select>
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* Big Render trigger buttons */}
+                        <div className="flex justify-between items-center gap-4 bg-zinc-950/40 p-4 border border-zinc-850 rounded-xl">
+                          <div className="space-y-0.5">
+                            <span className="text-[10px] text-zinc-500 uppercase font-mono font-bold block">Status Proyek</span>
+                            <span className="text-xs uppercase font-black text-amber-500 font-mono">{activeProject.status?.replace("_", " ")}</span>
+                          </div>
+                          <button
+                            onClick={async () => {
+                              setLoading("FFmpeg sedang memisahkan stream audio, melooping frame visual, menormalkan gain audio, menempelkan subtitle, dan merender final video...");
+                              setError(null);
+                              try {
+                                const res = await fetch(`/api/projects/${selectedProjectId}/render`, {
+                                  method: "POST",
+                                  headers: { "Content-Type": "application/json" },
+                                  body: JSON.stringify({ subtitle_style: activeProject.subtitle_style })
+                                });
+                                if (!res.ok) throw new Error("Gagal mengompilasi video.");
+                                const updated = await res.json();
+                                await fetchProjects();
+                                alert("Selamat! Video final Anda berhasil dikompilasi utuh menggunakan real FFmpeg lokal.");
+                              } catch (err: any) {
+                                setError(`Video render failed: ${err.message}`);
+                              } finally {
+                                setLoading(null);
+                              }
+                            }}
+                            className="bg-gradient-to-tr from-amber-600 to-amber-400 hover:from-amber-500 hover:to-amber-300 text-zinc-950 px-5 py-3 rounded-lg text-xs font-black shadow-lg shadow-amber-500/10 cursor-pointer flex items-center gap-1.5 transition"
+                          >
+                            <Play size={14} fill="currentColor" />
+                            Render Final Full Video (FFmpeg)
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Preview Player right col */}
+                    <div className="space-y-6">
+                      <PreviewPlayer project={activeProject} />
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* === TAB 10: SETTINGS === */}
+              {activeTab === "settings" && (
+                <div className="space-y-4 animate-in fade-in duration-200">
+                  <div className="flex items-center justify-between">
+                    <h2 className="text-xs font-black uppercase text-zinc-500 tracking-wider">Workspace Environment Settings</h2>
+                  </div>
+                  <ProviderSettings onSave={() => setActiveTab("brief")} />
                 </div>
               )}
 

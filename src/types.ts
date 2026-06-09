@@ -84,6 +84,10 @@ export interface Scene {
   video_path?: string;
   audio_path?: string;
   status: "pending" | "generating" | "completed" | "failed";
+  image_status?: "pending" | "generating" | "completed" | "failed";
+  tts_status?: "pending" | "generating" | "completed" | "failed";
+  video_status?: "pending" | "generating" | "completed" | "failed";
+  error?: string | null;
 }
 
 export interface StoryboardPart {
