@@ -6,17 +6,10 @@ interface ZImageConfig {
   model: string;
 }
 
-function buildEndpoint(baseUrl: string, suffix: string): string {
-  const cleanBase = baseUrl.replace(/\/+$/, "");
-  const cleanSuffix = suffix.startsWith("/") ? suffix.slice(1) : suffix;
-  
-  if (cleanBase.endsWith("/v1")) {
-    if (cleanSuffix.startsWith("v1/")) {
-      const rest = cleanSuffix.slice(3);
-      return `${cleanBase}/${rest}`;
-    }
-  }
-  return `${cleanBase}/${cleanSuffix}`;
+function openAIEndpoint(baseUrl: string, endpointPath: string) {
+  const clean = baseUrl.replace(/\/+$/, "");
+  if (clean.endsWith("/v1")) return `${clean}${endpointPath}`;
+  return `${clean}/v1${endpointPath}`;
 }
 
 /**
@@ -38,7 +31,7 @@ export async function generateLocalImage(
   // Ensure target folder exists
   fs.mkdirSync(path.dirname(absolutePath), { recursive: true });
   
-  const endpoint = buildEndpoint(baseUrl, "/v1/images/generations");
+  const endpoint = openAIEndpoint(baseUrl, "/images/generations");
   console.log(`[Z-Image] Triggering generation on: ${endpoint} for prompt: "${prompt.slice(0, 50)}..."`);
   
   try {

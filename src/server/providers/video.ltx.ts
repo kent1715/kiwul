@@ -6,17 +6,10 @@ interface VideoConfig {
   model: string;
 }
 
-function buildEndpoint(baseUrl: string, suffix: string): string {
-  const cleanBase = baseUrl.replace(/\/+$/, "");
-  const cleanSuffix = suffix.startsWith("/") ? suffix.slice(1) : suffix;
-  
-  if (cleanBase.endsWith("/v1")) {
-    if (cleanSuffix.startsWith("v1/")) {
-      const rest = cleanSuffix.slice(3);
-      return `${cleanBase}/${rest}`;
-    }
-  }
-  return `${cleanBase}/${cleanSuffix}`;
+function openAIEndpoint(baseUrl: string, endpointPath: string) {
+  const clean = baseUrl.replace(/\/+$/, "");
+  if (clean.endsWith("/v1")) return `${clean}${endpointPath}`;
+  return `${clean}/v1${endpointPath}`;
 }
 
 /**
@@ -50,7 +43,7 @@ export async function generateLocalVideo(
   
   try {
     const fileBase64 = fs.readFileSync(absoluteImagePath).toString("base64");
-    const endpoint = buildEndpoint(baseUrl, "/v1/videos");
+    const endpoint = openAIEndpoint(baseUrl, "/videos");
     
     const response = await fetch(endpoint, {
       method: "POST",
