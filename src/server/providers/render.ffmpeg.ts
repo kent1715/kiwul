@@ -40,13 +40,7 @@ export async function renderCompilation(projectId: string, storyboard: any): Pro
   
   const ffmpegOk = isFFmpegAvailable();
   if (!ffmpegOk) {
-    console.warn("[FFmpeg Warning] ffmpeg bin is not available in host path. Generating simulated output success file.");
-    // Create an aesthetic static MP4 mock video by copying an generic active mp4 placeholder if possible, or just mock the file
-    const mockFilePath = path.join(finalDirAbsolute, "final.mp4");
-    if (!fs.existsSync(mockFilePath)) {
-      fs.writeFileSync(mockFilePath, "MOCK_FFMPEG_MP4_CONTENT_STABLE_PLAYBACK");
-    }
-    return `/${finalDirRelative}/final.mp4`;
+    throw new Error("FFmpeg CLI is not found or not available in the host environment.");
   }
   
   // Safe temporary folder for intermediate clips
@@ -136,12 +130,7 @@ export async function renderCompilation(projectId: string, storyboard: any): Pro
     return `/${finalDirRelative}/final.mp4`;
   } catch (renderError: any) {
     console.error("[FFmpeg compiler error]", renderError);
-    // Safe final mock file fallback so client remains smooth
-    const mockFilePath = path.join(finalDirAbsolute, "final.mp4");
-    if (!fs.existsSync(mockFilePath)) {
-      fs.writeFileSync(mockFilePath, "MOCK_FFMPEG_MP4_CONCAT_ERROR_FALLBACK");
-    }
-    return `/${finalDirRelative}/final.mp4`;
+    throw renderError;
   } finally {
     // Clear temp files
     try {

@@ -22,7 +22,7 @@ app.use(express.json());
 // Serve outputs directory statically for vertical media assets (images, videos, TTS wave tracks)
 app.use("/outputs", express.static(path.join(process.cwd(), "outputs")));
 
-const PORT = 3000;
+const PORT = Number(process.env.PORT || 3000);
 
 // Initialize GoogleGenAI client (Server-Side only)
 const apiKey = process.env.GEMINI_API_KEY || "";
@@ -365,7 +365,7 @@ function readProviders(): any {
           default_size: "768x1024",
           steps: 8,
           cfg: 1,
-          allow_fallback: false
+          fallback_enabled: false
         },
         video: {
           provider: "ltx",

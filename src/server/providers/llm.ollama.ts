@@ -3,6 +3,19 @@ interface OllamaConfig {
   model: string;
 }
 
+function buildEndpoint(baseUrl: string, suffix: string): string {
+  const cleanBase = baseUrl.replace(/\/+$/, "");
+  const cleanSuffix = suffix.startsWith("/") ? suffix.slice(1) : suffix;
+  
+  if (cleanBase.endsWith("/v1")) {
+    if (cleanSuffix.startsWith("v1/")) {
+      const rest = cleanSuffix.slice(3);
+      return `${cleanBase}/${rest}`;
+    }
+  }
+  return `${cleanBase}/${cleanSuffix}`;
+}
+
 /**
  * Executes a text generation query against a local Ollama server
  */
@@ -14,7 +27,7 @@ export async function runOllamaLLM(
 ): Promise<string> {
   const baseUrl = config.base_url || "http://127.0.0.1:11434";
   const modelName = config.model || "qwen3:8b";
-  const endpoint = `${baseUrl.replace(/\/+$/, "")}/v1/chat/completions`;
+  const endpoint = buildEndpoint(baseUrl, "/v1/chat/completions");
   
   console.log(`[Ollama Adapter] Fetching chat completion from: ${endpoint} (Model: ${modelName})`);
   

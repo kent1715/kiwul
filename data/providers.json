@@ -13,7 +13,7 @@
     "default_size": "768x1024",
     "steps": 8,
     "cfg": 1,
-    "allow_fallback": false
+    "fallback_enabled": false
   },
   "video": {
     "provider": "ltx",

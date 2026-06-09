@@ -6,6 +6,19 @@ interface VideoConfig {
   model: string;
 }
 
+function buildEndpoint(baseUrl: string, suffix: string): string {
+  const cleanBase = baseUrl.replace(/\/+$/, "");
+  const cleanSuffix = suffix.startsWith("/") ? suffix.slice(1) : suffix;
+  
+  if (cleanBase.endsWith("/v1")) {
+    if (cleanSuffix.startsWith("v1/")) {
+      const rest = cleanSuffix.slice(3);
+      return `${cleanBase}/${rest}`;
+    }
+  }
+  return `${cleanBase}/${cleanSuffix}`;
+}
+
 /**
  * Generates video from scene image and motion prompt using local LTX Video service
  */
@@ -37,7 +50,7 @@ export async function generateLocalVideo(
   
   try {
     const fileBase64 = fs.readFileSync(absoluteImagePath).toString("base64");
-    const endpoint = `${baseUrl.replace(/\/+$/, "")}/v1/videos`;
+    const endpoint = buildEndpoint(baseUrl, "/v1/videos");
     
     const response = await fetch(endpoint, {
       method: "POST",
@@ -78,12 +91,7 @@ export async function generateLocalVideo(
     console.log(`[LTX Video] Successfully saved output video to: ${absoluteVideoPath}`);
     return `/${relativeVideoPath}`;
   } catch (err: any) {
-    console.warn(`[LTX Video Warning] Service failed: ${err.message}. Building slideshow MP4 fallback for rendering.`);
-    
-    // Instead of failing the entire project build, we'll write a simple fallback marker
-    // During FFmpeg compilation, if scene.video_path is not generated or failed,
-    // the renderer will automatically create a sliding dynamic pan MP4 from the image, 
-    // which operates as a professional direct fallback.
-    return "";
+    console.error(`[LTX Video Error] Service failed: ${err.message}`);
+    throw err;
   }
 }

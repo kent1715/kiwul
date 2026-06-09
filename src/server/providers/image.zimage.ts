@@ -6,6 +6,19 @@ interface ZImageConfig {
   model: string;
 }
 
+function buildEndpoint(baseUrl: string, suffix: string): string {
+  const cleanBase = baseUrl.replace(/\/+$/, "");
+  const cleanSuffix = suffix.startsWith("/") ? suffix.slice(1) : suffix;
+  
+  if (cleanBase.endsWith("/v1")) {
+    if (cleanSuffix.startsWith("v1/")) {
+      const rest = cleanSuffix.slice(3);
+      return `${cleanBase}/${rest}`;
+    }
+  }
+  return `${cleanBase}/${cleanSuffix}`;
+}
+
 /**
  * Generates an image using local Z-Image endpoint
  */
@@ -25,7 +38,7 @@ export async function generateLocalImage(
   // Ensure target folder exists
   fs.mkdirSync(path.dirname(absolutePath), { recursive: true });
   
-  const endpoint = `${baseUrl.replace(/\/+$/, "")}/v1/images/generations`;
+  const endpoint = buildEndpoint(baseUrl, "/v1/images/generations");
   console.log(`[Z-Image] Triggering generation on: ${endpoint} for prompt: "${prompt.slice(0, 50)}..."`);
   
   try {
@@ -72,23 +85,7 @@ export async function generateLocalImage(
     console.log(`[Z-Image] Saved local image to: ${absolutePath}`);
     return `/${relativePath}`;
   } catch (err: any) {
-    console.warn(`[Z-Image Error] Failed: ${err.message}. Saving a placeholder/unsplash image to continue pipeline.`);
-    
-    // Create an aesthetic Unsplash fallback download to make the visual REAL in the client
-    try {
-      const unsplashUrl = `https://images.unsplash.com/photo-1598965402521-6fd2328b60a4?auto=format&fit=crop&q=80&w=768&h=1024`;
-      const fallbackRes = await fetch(unsplashUrl);
-      if (fallbackRes.ok) {
-        const buffer = Buffer.from(await fallbackRes.arrayBuffer());
-        fs.writeFileSync(absolutePath, buffer);
-        console.log(`[Z-Image Fallback] Downloaded real Unsplash visual and saved to output.`);
-        return `/${relativePath}`;
-      }
-    } catch (fallbackErr: any) {
-      console.error("[Z-Image Unsplash Fallback Error]", fallbackErr);
-    }
-    
-    // Return standard fallback if everything fails
-    return "";
+    console.error(`[Z-Image Error] Failed: ${err.message}`);
+    throw err;
   }
 }

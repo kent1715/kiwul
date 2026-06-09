@@ -18,10 +18,10 @@ interface ProviderSettingsProps {
 
 export default function ProviderSettings({ onSave }: ProviderSettingsProps) {
   const [providers, setProviders] = useState<ProviderRegistry>({
-    llm: { provider: "gemini", base_url: "", model: "gemini-3.5-flash" },
-    image: { provider: "gemini", base_url: "", model: "gemini-2.5-flash-image" },
-    tts: { provider: "gemini", base_url: "", model: "gemini-3.1-flash-tts-preview" },
-    video: { provider: "gemini", base_url: "", model: "veo-3.1-lite-generate-preview" }
+    llm: { provider: "ollama", base_url: "http://127.0.0.1:11434/v1", model: "qwen3:8b" },
+    image: { provider: "zimage", base_url: "http://127.0.0.1:9100/v1", model: "z-image-turbo" },
+    tts: { provider: "edge", base_url: "", model: "id-ID-ArdiNeural", voice: "id-ID-ArdiNeural" },
+    video: { provider: "ltx", base_url: "http://127.0.0.1:9200/v1", model: "comfy-ltxv-i2v" }
   });
 
   const [loading, setLoading] = useState(false);
@@ -291,6 +291,7 @@ export default function ProviderSettings({ onSave }: ProviderSettingsProps) {
                 className="w-full bg-zinc-950 border border-zinc-805 rounded px-2.5 py-1.5 focus:outline-none focus:border-amber-500 font-medium text-zinc-300"
               >
                 <option value="gemini">Google TTS (Gemini 3.1-TTS)</option>
+                <option value="edge">Edge-TTS (Local CLI Engine)</option>
                 <option value="f5tts">F5-TTS (Local Voice Cloner)</option>
               </select>
             </div>
@@ -358,11 +359,12 @@ export default function ProviderSettings({ onSave }: ProviderSettingsProps) {
                 className="w-full bg-zinc-950 border border-zinc-805 rounded px-2.5 py-1.5 focus:outline-none focus:border-amber-500 font-medium text-zinc-300"
               >
                 <option value="gemini">Google Veo (Cloud Video)</option>
-                <option value="ltx_comfy">ComfyUI/LTXV (Local Image-To-Video)</option>
+                <option value="ltx">LTX Video (Local Image-To-Video)</option>
+                <option value="ltx_comfy">ComfyUI/LTXV (Local Proxy)</option>
               </select>
             </div>
 
-            {providers.video.provider === "ltx_comfy" && (
+            {(providers.video.provider === "ltx" || providers.video.provider === "ltx_comfy") && (
               <div>
                 <label className="block text-[11px] text-zinc-550 font-medium mb-1">Base URL (Comfy API)</label>
                 <input 
