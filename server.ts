@@ -35,33 +35,171 @@ const ai = new GoogleGenAI({
   },
 });
 
-// Relocate database directories and migrate existing files if any
-function runDatabaseMigration() {
-  const oldDir = path.join(process.cwd(), "src", "db");
-  const newDir = path.join(process.cwd(), "data");
-  
-  fs.mkdirSync(newDir, { recursive: true });
-  fs.mkdirSync(path.join(process.cwd(), "outputs"), { recursive: true });
-
-  const oldProj = path.join(oldDir, "projects.json");
-  const newProj = path.join(newDir, "projects.json");
-  if (fs.existsSync(oldProj) && !fs.existsSync(newProj)) {
-    console.log("[Migration] Migrating projects.json to data/projects.json...");
-    fs.copyFileSync(oldProj, newProj);
-  }
-
-  const oldProv = path.join(oldDir, "providers.json");
-  const newProv = path.join(newDir, "providers.json");
-  if (fs.existsSync(oldProv) && !fs.existsSync(newProv)) {
-    console.log("[Migration] Migrating providers.json to data/providers.json...");
-    fs.copyFileSync(oldProv, newProv);
-  }
-}
-runDatabaseMigration();
-
 // Paths to localized database files
 const PROJECTS_FILE = path.join(process.cwd(), "data", "projects.json");
 const PROVIDERS_FILE = path.join(process.cwd(), "data", "providers.json");
+const JOBS_FILE = path.join(process.cwd(), "data", "jobs.json");
+
+// Helper: Normalize Provider Names (PERBAIKAN WAJIB 3)
+function normalizeProviderName(provider: string): string {
+  if (!provider) return "";
+  const lower = provider.toLowerCase().trim();
+  if (lower === "ltx_comfy" || lower === "comfy_ltx") return "ltx";
+  if (lower === "edge-tts") return "edge";
+  return lower;
+}
+
+// Jobs Persistence Helpers (PERBAIKAN WAJIB 9 & 10)
+function loadJobs(): Record<string, { 
+  status: "pending" | "generating" | "completed" | "failed", 
+  progress: number, 
+  total: number, 
+  completed: number, 
+  error: string | null 
+}> {
+  try {
+    if (!fs.existsSync(JOBS_FILE)) {
+      fs.mkdirSync(path.dirname(JOBS_FILE), { recursive: true });
+      fs.writeFileSync(JOBS_FILE, "{}", "utf-8");
+      return {};
+    }
+    const data = fs.readFileSync(JOBS_FILE, "utf-8");
+    return JSON.parse(data);
+  } catch (err) {
+    console.error("Error reading jobs:", err);
+    return {};
+  }
+}
+
+function saveJobs(jobsToSave: any) {
+  try {
+    fs.mkdirSync(path.dirname(JOBS_FILE), { recursive: true });
+    fs.writeFileSync(JOBS_FILE, JSON.stringify(jobsToSave, null, 2), "utf-8");
+  } catch (err) {
+    console.error("Error writing jobs:", err);
+  }
+}
+
+function updateJob(jobId: string, fields: Partial<{
+  status: "pending" | "running" | "generating" | "completed" | "failed";
+  progress: number;
+  total: number;
+  completed: number;
+  error: string | null;
+}>) {
+  const currentJobs = loadJobs();
+  const existing = currentJobs[jobId] || { status: "pending", progress: 0, total: 0, completed: 0, error: null };
+  const updatedStatus = fields.status === "running" ? "generating" : (fields.status ?? existing.status);
+  
+  (currentJobs as any)[jobId] = {
+    ...existing,
+    ...fields,
+    status: updatedStatus
+  };
+  saveJobs(currentJobs);
+}
+
+function updateJobProgress(
+  jobId: string, 
+  completed: number, 
+  total: number, 
+  status: "pending" | "running" | "generating" | "completed" | "failed", 
+  error: string | null = null
+) {
+  const currentJobs = loadJobs();
+  const progress = total > 0 ? Math.round((completed / total) * 100) : 0;
+  const updatedStatus = status === "running" ? "generating" : status;
+  currentJobs[jobId] = {
+    status: updatedStatus,
+    progress,
+    total,
+    completed,
+    error
+  };
+  saveJobs(currentJobs);
+}
+
+// Ensure Data Directory and Default Files (PERBAIKAN WAJIB 4 & 5)
+function ensureDataFiles() {
+  const dataDir = path.join(process.cwd(), "data");
+  fs.mkdirSync(dataDir, { recursive: true });
+  fs.mkdirSync(path.join(process.cwd(), "outputs"), { recursive: true });
+
+  const oldDir = path.join(process.cwd(), "src", "db");
+  const oldProj = path.join(oldDir, "projects.json");
+  const newProj = PROJECTS_FILE;
+  if (fs.existsSync(oldProj) && !fs.existsSync(newProj)) {
+    console.log("[Migration] Migrating projects.json to data/projects.json...");
+    try {
+      fs.copyFileSync(oldProj, newProj);
+    } catch (err) {
+      console.error("Migration of projects failed:", err);
+    }
+  }
+
+  const oldProv = path.join(oldDir, "providers.json");
+  const newProv = PROVIDERS_FILE;
+  if (fs.existsSync(oldProv) && !fs.existsSync(newProv)) {
+    console.log("[Migration] Migrating providers.json to data/providers.json...");
+    try {
+      fs.copyFileSync(oldProv, newProv);
+    } catch (err) {
+      console.error("Migration of providers failed:", err);
+    }
+  }
+
+  // Ensure projects.json
+  if (!fs.existsSync(newProj)) {
+    fs.writeFileSync(newProj, "[]", "utf-8");
+  }
+
+  // Ensure providers.json (default local-first)
+  if (!fs.existsSync(newProv)) {
+    const defaultProviders = {
+      llm: {
+        provider: "ollama",
+        base_url: "http://127.0.0.1:11434/v1",
+        model: "qwen3:8b",
+        enabled: true
+      },
+      image: {
+        provider: "zimage",
+        base_url: "http://127.0.0.1:9100/v1",
+        model: "z-image-turbo",
+        enabled: true,
+        default_size: "768x1024",
+        fallback_enabled: false
+      },
+      video: {
+        provider: "ltx",
+        base_url: "http://127.0.0.1:9200/v1",
+        model: "comfy-ltxv-i2v",
+        enabled: true,
+        duration: 3,
+        fps: 24,
+        resolution: "768x1024"
+      },
+      tts: {
+        provider: "edge",
+        base_url: "",
+        model: "id-ID-ArdiNeural",
+        enabled: true
+      },
+      render: {
+        provider: "ffmpeg",
+        enabled: true,
+        output_format: "mp4"
+      }
+    };
+    fs.writeFileSync(newProv, JSON.stringify(defaultProviders, null, 2), "utf-8");
+  }
+
+  // Ensure jobs.json
+  if (!fs.existsSync(JOBS_FILE)) {
+    fs.writeFileSync(JOBS_FILE, "{}", "utf-8");
+  }
+}
+ensureDataFiles();
 
 // Helper to clean JSON string from LLM responses
 function cleanJsonResponse(text: string): any {
@@ -963,30 +1101,54 @@ app.post("/api/projects/:id/scenes/:scene_id/image", async (req, res) => {
     
     const providers = readProviders();
     const imgConfig = providers.image || { provider: "gemini", model: "gemini-2.5-flash-image" };
+    const imgProviderNormalized = normalizeProviderName(imgConfig.provider);
     
-    if (imgConfig.provider === "zimage") {
+    if (imgProviderNormalized === "zimage") {
       console.log(`[Image API Dispatch] Using local Z-Image for scene ${req.params.scene_id}`);
-      const savedPath = await generateLocalImage(
-        project.project_id,
-        sceneMatched.scene_id,
-        activePrompt,
-        imgConfig
-      );
-      
-      if (savedPath) {
-        sceneMatched.image_path = savedPath;
-        sceneMatched.image_status = "completed";
-        sceneMatched.error = null;
-        projects[idx] = project;
-        writeProjects(projects);
-        return res.json({ status: "success", image_path: savedPath });
-      } else {
-        throw new Error("Local Z-Image adapter failed to produce saved local path.");
+      try {
+        const savedPath = await generateLocalImage(
+          project.project_id,
+          sceneMatched.scene_id,
+          activePrompt,
+          imgConfig
+        );
+        
+        if (savedPath) {
+          sceneMatched.image_path = savedPath;
+          sceneMatched.image_status = "completed";
+          sceneMatched.error = null;
+          projects[idx] = project;
+          writeProjects(projects);
+          return res.json({ status: "success", image_path: savedPath });
+        } else {
+          throw new Error("Local Z-Image adapter failed to produce saved local path.");
+        }
+      } catch (err: any) {
+        console.error("Z-Image generation failed:", err);
+        if (imgConfig.fallback_enabled === true) {
+          const generatedFallback = getUnsplashFallback(activePrompt, "9:16");
+          sceneMatched.image_path = generatedFallback;
+          sceneMatched.image_status = "completed";
+          sceneMatched.error = `Z-Image failed, fallback image was used. Error: ${err.message}`;
+          projects[idx] = project;
+          writeProjects(projects);
+          return res.json({ 
+            status: "success", 
+            image_path: generatedFallback, 
+            warning: "Z-Image failed, fallback image was used." 
+          });
+        } else {
+          sceneMatched.image_status = "failed";
+          sceneMatched.error = err.message || "Z-Image failed, fallback disabled.";
+          projects[idx] = project;
+          writeProjects(projects);
+          return res.status(500).json({ error: `Z-Image failed and fallback is disabled: ${err.message}` });
+        }
       }
     }
     
-    // Fallback: Gemini native generator (Server side)
-    if (apiKey) {
+    // Fallback/Direct cloud: Gemini native generator (Server side)
+    if (imgProviderNormalized === "gemini" && apiKey) {
       try {
         console.log("Generating styled visual image with Gemini...");
         const imgResponse = await ai.models.generateContent({
@@ -1023,15 +1185,23 @@ app.post("/api/projects/:id/scenes/:scene_id/image", async (req, res) => {
       }
     }
     
-    // Standard aesthetic Unsplash fallback
-    const generatedFallback = getUnsplashFallback(activePrompt, "9:16");
-    sceneMatched.image_path = generatedFallback;
-    sceneMatched.image_status = "completed";
-    sceneMatched.error = null;
-    
-    projects[idx] = project;
-    writeProjects(projects);
-    res.json({ status: "success", image_path: generatedFallback });
+    // Unsplash directly or as gemini fallback
+    if (imgProviderNormalized === "unsqueeze" || imgConfig.fallback_enabled === true || imgConfig.provider === "unsplash" || imgConfig.provider === "gemini") {
+      const generatedFallback = getUnsplashFallback(activePrompt, "9:16");
+      sceneMatched.image_path = generatedFallback;
+      sceneMatched.image_status = "completed";
+      sceneMatched.error = null;
+      
+      projects[idx] = project;
+      writeProjects(projects);
+      return res.json({ status: "success", image_path: generatedFallback });
+    } else {
+      sceneMatched.image_status = "failed";
+      sceneMatched.error = "Selected image provider failed or is unsupported, and fallback is disabled.";
+      projects[idx] = project;
+      writeProjects(projects);
+      return res.status(500).json({ error: "Selected image provider failed, fallback is disabled." });
+    }
   } catch (error: any) {
     console.error("Image generation failed:", error);
     sceneMatched.image_status = "failed";
@@ -1063,15 +1233,27 @@ app.post("/api/projects/:id/scenes/:scene_id/tts", async (req, res) => {
     writeProjects(projects);
     
     const providers = readProviders();
-    const ttsConfig = providers.tts || { provider: "f5tts", base_url: "http://127.0.0.1:9400", model: "f5tts" };
+    const ttsConfig = providers.tts || { provider: "edge", base_url: "", model: "id-ID-ArdiNeural" };
+    const ttsProviderNormalized = normalizeProviderName(ttsConfig.provider);
     
-    console.log(`[TTS API Dispatch] Instantiating speech path for scene: ${sceneMatched.scene_id}`);
-    const audioPath = await generateLocalTTS(
-      project.project_id,
-      sceneMatched.scene_id,
-      voText,
-      ttsConfig
-    );
+    console.log(`[TTS API Dispatch] Instantiating speech path for scene: ${sceneMatched.scene_id} using provider: ${ttsProviderNormalized}`);
+    
+    let audioPath = "";
+    if (ttsProviderNormalized === "edge") {
+      audioPath = await generateEdgeTTS(
+        project.project_id,
+        sceneMatched.scene_id,
+        voText,
+        ttsConfig
+      );
+    } else {
+      audioPath = await generateLocalTTS(
+        project.project_id,
+        sceneMatched.scene_id,
+        voText,
+        ttsConfig
+      );
+    }
     
     sceneMatched.audio_path = audioPath;
     sceneMatched.vo = voText;
@@ -1113,12 +1295,13 @@ app.post("/api/projects/:id/scenes/:scene_id/video", async (req, res) => {
     writeProjects(projects);
     
     const providers = readProviders();
-    const vConfig = providers.video || { provider: "ltx_comfy", base_url: "http://127.0.0.1:9200", model: "comfy-ltxv-i2v" };
+    const vConfig = providers.video || { provider: "ltx", base_url: "http://127.0.0.1:9200", model: "comfy-ltxv-i2v" };
+    vConfig.provider = normalizeProviderName(vConfig.provider);
     
     const activePrompt = custom_prompt || sceneMatched.motion_prompt || "subtle camera push-in, natural breathing motion, small head movement, slight cloth movement, stable anatomy, no scene change";
     const imagePath = sceneMatched.image_path || "";
     
-    console.log(`[Video API Dispatch] Instantiating LTX video for scene: ${sceneMatched.scene_id}`);
+    console.log(`[Video API Dispatch] Instantiating ${vConfig.provider} video for scene: ${sceneMatched.scene_id}`);
     const videoPath = await generateLocalVideo(
       project.project_id,
       sceneMatched.scene_id,
@@ -1190,18 +1373,10 @@ app.post("/api/projects/:id/render", async (req, res) => {
   }
 });
 
-// === JOBS STORAGE FOR BATCH PIPE RUNS ===
-const jobs: Record<string, { 
-  status: "pending" | "running" | "completed" | "failed", 
-  progress: number, 
-  total: number, 
-  completed: number, 
-  error: string | null 
-}> = {};
-
-// Get status of a background task
+// Get status of a background task (PERBAIKAN WAJIB 9)
 app.get("/api/jobs/:jobId", (req, res) => {
-  const job = jobs[req.params.jobId];
+  const currentJobs = loadJobs();
+  const job = currentJobs[req.params.jobId];
   if (!job) return res.status(404).json({ error: "Job-id tidak ditemukan." });
   res.json(job);
 });
@@ -1231,33 +1406,57 @@ app.post("/api/projects/:id/scenes/:scene_id/regenerate", async (req, res) => {
       sceneMatched.image_status = "generating";
       writeProjects(projects);
       const activePrompt = custom_prompt || sceneMatched.image_prompt;
-      if (providers.image && providers.image.provider === "zimage") {
-        sceneMatched.image_path = await generateLocalImage(project.project_id, sceneMatched.scene_id, activePrompt, providers.image);
-        sceneMatched.image_status = "completed";
+      const imgProv = normalizeProviderName(providers.image?.provider);
+      
+      if (imgProv === "zimage") {
+        try {
+          sceneMatched.image_path = await generateLocalImage(project.project_id, sceneMatched.scene_id, activePrompt, providers.image);
+          sceneMatched.image_status = "completed";
+          sceneMatched.error = null;
+        } catch (err: any) {
+          if (providers.image?.fallback_enabled === true) {
+            sceneMatched.image_path = getUnsplashFallback(activePrompt, "9:16");
+            sceneMatched.image_status = "completed";
+            sceneMatched.error = `Z-Image failed, fallback image was used. Error: ${err.message}`;
+          } else {
+            sceneMatched.image_status = "failed";
+            sceneMatched.error = `Z-Image failed: ${err.message}`;
+            writeProjects(projects);
+            return res.status(500).json({ error: `Z-Image failed and fallback is disabled: ${err.message}` });
+          }
+        }
       } else {
         sceneMatched.image_path = getUnsplashFallback(activePrompt, "9:16");
         sceneMatched.image_status = "completed";
+        sceneMatched.error = null;
       }
     }
     
     if (type === "tts" || type === "all") {
       sceneMatched.tts_status = "generating";
       writeProjects(projects);
-      if (providers.tts && providers.tts.provider === "f5tts") {
-        sceneMatched.audio_path = await generateLocalTTS(project.project_id, sceneMatched.scene_id, sceneMatched.vo, providers.tts);
-        sceneMatched.tts_status = "completed";
-      } else {
+      const ttsProv = normalizeProviderName(providers.tts?.provider || "edge");
+      
+      if (ttsProv === "edge") {
         sceneMatched.audio_path = await generateEdgeTTS(project.project_id, sceneMatched.scene_id, sceneMatched.vo, providers.tts);
         sceneMatched.tts_status = "completed";
+      } else {
+        sceneMatched.audio_path = await generateLocalTTS(project.project_id, sceneMatched.scene_id, sceneMatched.vo, providers.tts);
+        sceneMatched.tts_status = "completed";
       }
+      sceneMatched.error = null;
     }
     
     if (type === "video" || type === "all") {
       sceneMatched.video_status = "generating";
       writeProjects(projects);
-      const activePrompt = custom_prompt || sceneMatched.motion_prompt;
-      sceneMatched.video_path = await generateLocalVideo(project.project_id, sceneMatched.scene_id, sceneMatched.image_path, activePrompt, providers.video);
+      const activePrompt = custom_prompt || sceneMatched.motion_prompt || "subtle camera movement";
+      const videoConfig = providers.video || { provider: "ltx" };
+      videoConfig.provider = normalizeProviderName(videoConfig.provider);
+      
+      sceneMatched.video_path = await generateLocalVideo(project.project_id, sceneMatched.scene_id, sceneMatched.image_path, activePrompt, videoConfig);
       sceneMatched.video_status = "completed";
+      sceneMatched.error = null;
     }
     
     sceneMatched.error = null;
@@ -1288,26 +1487,39 @@ app.post("/api/projects/:id/generate-all-images", async (req, res) => {
   });
   
   const jobId = "job_img_" + Math.random().toString(36).substring(2, 9);
-  jobs[jobId] = { status: "running", progress: 0, total: scenes.length, completed: 0, error: null };
+  updateJobProgress(jobId, 0, scenes.length, "generating");
   
   const providers = readProviders();
   
   // Async sequential execution to prevent workstation crash
   (async () => {
     try {
+      let completedCount = 0;
       for (const scene of scenes) {
         scene.image_status = "generating";
         writeProjects(projects);
         
         try {
-          if (providers.image && providers.image.provider === "zimage") {
-            const savedPath = await generateLocalImage(project.project_id, scene.scene_id, scene.image_prompt, providers.image);
-            if (savedPath) {
-              scene.image_path = savedPath;
-              scene.image_status = "completed";
-              scene.error = null;
-            } else {
-              throw new Error("Local image generation failed to return filepath.");
+          const imgProv = normalizeProviderName(providers.image?.provider);
+          if (imgProv === "zimage") {
+            try {
+              const savedPath = await generateLocalImage(project.project_id, scene.scene_id, scene.image_prompt, providers.image);
+              if (savedPath) {
+                scene.image_path = savedPath;
+                scene.image_status = "completed";
+                scene.error = null;
+              } else {
+                throw new Error("Local image generation failed to return filepath.");
+              }
+            } catch (err: any) {
+              if (providers.image?.fallback_enabled === true) {
+                scene.image_path = getUnsplashFallback(scene.image_prompt || scene.action, "9:16");
+                scene.image_status = "completed";
+                scene.error = `Z-Image failed, fallback image was used. Error: ${err.message}`;
+              } else {
+                scene.image_status = "failed";
+                scene.error = `Z-Image failed: ${err.message}`;
+              }
             }
           } else {
             scene.image_path = getUnsplashFallback(scene.image_prompt || scene.action, "9:16");
@@ -1319,14 +1531,13 @@ app.post("/api/projects/:id/generate-all-images", async (req, res) => {
           scene.error = err.message;
         }
         
-        jobs[jobId].completed++;
-        jobs[jobId].progress = Math.round((jobs[jobId].completed / jobs[jobId].total) * 100);
+        completedCount++;
+        updateJobProgress(jobId, completedCount, scenes.length, "generating");
         writeProjects(projects);
       }
-      jobs[jobId].status = "completed";
+      updateJobProgress(jobId, completedCount, scenes.length, "completed");
     } catch (err: any) {
-      jobs[jobId].status = "failed";
-      jobs[jobId].error = err.message;
+      updateJobProgress(jobId, scenes.length, scenes.length, "failed", err.message);
     }
   })();
   
@@ -1350,19 +1561,23 @@ app.post("/api/projects/:id/generate-all-videos", async (req, res) => {
   });
   
   const jobId = "job_vid_" + Math.random().toString(36).substring(2, 9);
-  jobs[jobId] = { status: "running", progress: 0, total: scenes.length, completed: 0, error: null };
+  updateJobProgress(jobId, 0, scenes.length, "generating");
   
   const providers = readProviders();
   
   (async () => {
     try {
+      let completedCount = 0;
       for (const scene of scenes) {
         scene.video_status = "generating";
         writeProjects(projects);
         
         try {
           const videoPrompt = scene.motion_prompt || "subtle motion, slow push-in";
-          const savedPath = await generateLocalVideo(project.project_id, scene.scene_id, scene.image_path, videoPrompt, providers.video);
+          const videoConfig = providers.video || { provider: "ltx" };
+          videoConfig.provider = normalizeProviderName(videoConfig.provider);
+          
+          const savedPath = await generateLocalVideo(project.project_id, scene.scene_id, scene.image_path, videoPrompt, videoConfig);
           if (savedPath) {
             scene.video_path = savedPath;
             scene.video_status = "completed";
@@ -1375,14 +1590,13 @@ app.post("/api/projects/:id/generate-all-videos", async (req, res) => {
           scene.error = err.message;
         }
         
-        jobs[jobId].completed++;
-        jobs[jobId].progress = Math.round((jobs[jobId].completed / jobs[jobId].total) * 100);
+        completedCount++;
+        updateJobProgress(jobId, completedCount, scenes.length, "generating");
         writeProjects(projects);
       }
-      jobs[jobId].status = "completed";
+      updateJobProgress(jobId, completedCount, scenes.length, "completed");
     } catch (err: any) {
-      jobs[jobId].status = "failed";
-      jobs[jobId].error = err.message;
+      updateJobProgress(jobId, scenes.length, scenes.length, "failed", err.message);
     }
   })();
   
@@ -1406,22 +1620,26 @@ app.post("/api/projects/:id/generate-all-tts", async (req, res) => {
   });
   
   const jobId = "job_tts_" + Math.random().toString(36).substring(2, 9);
-  jobs[jobId] = { status: "running", progress: 0, total: scenes.length, completed: 0, error: null };
+  updateJobProgress(jobId, 0, scenes.length, "generating");
   
   const providers = readProviders();
   
   (async () => {
     try {
+      let completedCount = 0;
       for (const scene of scenes) {
         scene.tts_status = "generating";
         writeProjects(projects);
         
         try {
           let savedPath = "";
-          if (providers.tts && providers.tts.provider === "f5tts") {
-            savedPath = await generateLocalTTS(project.project_id, scene.scene_id, scene.vo, providers.tts);
+          const ttsConfig = providers.tts || { provider: "edge" };
+          const ttsProv = normalizeProviderName(ttsConfig.provider);
+          
+          if (ttsProv === "edge") {
+            savedPath = await generateEdgeTTS(project.project_id, scene.scene_id, scene.vo, ttsConfig);
           } else {
-            savedPath = await generateEdgeTTS(project.project_id, scene.scene_id, scene.vo, providers.tts);
+            savedPath = await generateLocalTTS(project.project_id, scene.scene_id, scene.vo, ttsConfig);
           }
           
           if (savedPath) {
@@ -1436,14 +1654,13 @@ app.post("/api/projects/:id/generate-all-tts", async (req, res) => {
           scene.error = err.message;
         }
         
-        jobs[jobId].completed++;
-        jobs[jobId].progress = Math.round((jobs[jobId].completed / jobs[jobId].total) * 100);
+        completedCount++;
+        updateJobProgress(jobId, completedCount, scenes.length, "generating");
         writeProjects(projects);
       }
-      jobs[jobId].status = "completed";
+      updateJobProgress(jobId, completedCount, scenes.length, "completed");
     } catch (err: any) {
-      jobs[jobId].status = "failed";
-      jobs[jobId].error = err.message;
+      updateJobProgress(jobId, scenes.length, scenes.length, "failed", err.message);
     }
   })();
   
@@ -1492,8 +1709,9 @@ app.post("/api/providers", (req, res) => {
 // 17. Test connection to local AI micro-providers specifically (Ollama, Z-Image, F5-TTS, ComfyUI-LTX, FFmpeg)
 app.post("/api/providers/status", async (req, res) => {
   const { provider, base_url, model } = req.body;
+  const normalizedProv = normalizeProviderName(provider);
   
-  if (provider === "ffmpeg") {
+  if (normalizedProv === "ffmpeg") {
     try {
       execSync("ffmpeg -version", { stdio: "ignore" });
       return res.json({ 
@@ -1510,23 +1728,38 @@ app.post("/api/providers/status", async (req, res) => {
     }
   }
 
-  if (provider === "edge") {
+  if (normalizedProv === "edge") {
     try {
-      const pingUrl = "https://translate.google.com/translate_tts?ie=UTF-8&tl=id&client=tw-ob&q=tes";
-      const edgeProbe = await fetch(pingUrl, { method: "GET" });
-      if (edgeProbe.ok) {
-        return res.json({ 
-          status: "connected", 
-          latency: "Cloud speed", 
-          model_found: model || "id-ID-ArdiNeural", 
-          details: "Edge-TTS (Google Translate API) is reachable and online." 
+      fs.mkdirSync(path.join(process.cwd(), "outputs"), { recursive: true });
+      const voiceName = model || "id-ID-ArdiNeural";
+      const testFile = path.join(process.cwd(), "outputs", "test_edge_tts.mp3");
+      
+      if (fs.existsSync(testFile)) {
+        try { fs.unlinkSync(testFile); } catch (_) {}
+      }
+      
+      try {
+        execSync(`edge-tts --voice ${voiceName} --text "tes suara" --write-media "${testFile}"`, { stdio: "ignore" });
+      } catch (execErr: any) {
+        return res.json({
+          status: "disconnected",
+          error: "edge-tts CLI not found. Install with: pip install edge-tts"
         });
       }
-      throw new Error(`Edge returned failed status ${edgeProbe.status}`);
+      
+      if (fs.existsSync(testFile)) {
+        return res.json({ 
+          status: "connected", 
+          latency: "Local speed", 
+          model_found: voiceName, 
+          details: `Edge-TTS voice generated successfully at outputs/test_edge_tts.mp3.` 
+        });
+      }
+      throw new Error("Edge-TTS CLI executed but file was not created.");
     } catch (err: any) {
       return res.json({ 
         status: "disconnected", 
-        error: `Edge-TTS unreachable: ${err.message}` 
+        error: `Edge-TTS test failed: ${err.message}` 
       });
     }
   }
@@ -1535,12 +1768,12 @@ app.post("/api/providers/status", async (req, res) => {
     return res.json({ status: "disconnected", error: "Connection URL not defined" });
   }
   
-  console.log(`[Provider Status Tester] Rigorous verification for: ${provider} on ${base_url}`);
+  console.log(`[Provider Status Tester] Rigorous verification for normalized: ${normalizedProv} on ${base_url}`);
   
   try {
     const cleanUrl = base_url.replace(/\/+$/, "");
     
-    if (provider === "ollama") {
+    if (normalizedProv === "ollama") {
       const resp = await fetch(`${cleanUrl}/models`);
       if (resp.ok) {
         return res.json({ 
@@ -1550,7 +1783,7 @@ app.post("/api/providers/status", async (req, res) => {
         });
       }
       throw new Error(`Ollama returned status ${resp.status}`);
-    } else if (provider === "zimage") {
+    } else if (normalizedProv === "zimage") {
       // Test models
       const mResp = await fetch(`${cleanUrl}/models`);
       if (!mResp.ok) throw new Error(`Z-Image models list unreachable (${mResp.status})`);
@@ -1574,7 +1807,7 @@ app.post("/api/providers/status", async (req, res) => {
         });
       }
       throw new Error(`Z-Image generations endpoint failing with status ${genResp.status}`);
-    } else if (provider === "ltx" || provider === "ltx_comfy") {
+    } else if (normalizedProv === "ltx") {
       const resp = await fetch(`${cleanUrl}/models`);
       if (resp.ok) {
         return res.json({ 
@@ -1584,7 +1817,7 @@ app.post("/api/providers/status", async (req, res) => {
         });
       }
       throw new Error(`LTX proxy status failed ${resp.status}`);
-    } else if (provider === "f5tts") {
+    } else if (normalizedProv === "f5tts") {
       try {
         const respHealth = await fetch(`${cleanUrl}/health`);
         if (respHealth.ok) {
@@ -1634,8 +1867,9 @@ async function startServer() {
     console.log("Production static handler mounted.");
   }
   
-  app.listen(PORT, "0.0.0.0", () => {
-    console.log(`Server running on http://0.0.0.0:${PORT}`);
+  const HOST = process.env.HOST || "127.0.0.1";
+  app.listen(PORT, HOST, () => {
+    console.log(`Server running on http://${HOST}:${PORT}`);
   });
 }
 

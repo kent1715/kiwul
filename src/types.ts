@@ -2,6 +2,8 @@
  * Type declarations for Kiwul Content Studio
  */
 
+export type AssetStatus = "pending" | "generating" | "running" | "completed" | "failed";
+
 export type ProjectStatus =
   | "draft"
   | "ideas_generated"
@@ -16,11 +18,18 @@ export type ProjectStatus =
   | "failed";
 
 export interface ProviderSettings {
-  provider: "gemini" | "ollama" | "zimage" | "f5tts" | "ltx_comfy";
+  provider: "gemini" | "ollama" | "zimage" | "f5tts" | "edge" | "ltx" | "ltx_comfy" | "ffmpeg" | string;
   base_url: string;
   model: string;
   voice?: string;
   api_key?: string;
+  enabled?: boolean;
+  default_size?: string;
+  fallback_enabled?: boolean;
+  duration?: number;
+  fps?: number;
+  resolution?: string;
+  output_format?: string;
 }
 
 export interface ProviderRegistry {
@@ -71,22 +80,34 @@ export interface ScriptNarrative {
 
 export interface Scene {
   scene_id: string;
-  part_number: number;
-  scene_number: number;
-  time_range: string;
+  part_number?: number;
+  scene_number?: number;
+  order?: number;
+  time_range?: string;
   duration: number;
-  action: string;
+
+  action?: string;
+  visual_description?: string;
   vo: string;
+
   image_prompt: string;
   negative_prompt?: string;
   motion_prompt: string;
+  camera?: string;
+
+  character_ids?: string[];
+  location_id?: string;
+
   image_path?: string;
   video_path?: string;
   audio_path?: string;
-  status: "pending" | "generating" | "completed" | "failed";
-  image_status?: "pending" | "generating" | "completed" | "failed";
-  tts_status?: "pending" | "generating" | "completed" | "failed";
-  video_status?: "pending" | "generating" | "completed" | "failed";
+
+  image_status?: AssetStatus;
+  video_status?: AssetStatus;
+  tts_status?: AssetStatus;
+  render_status?: AssetStatus;
+  status?: AssetStatus;
+
   error?: string | null;
 }
 

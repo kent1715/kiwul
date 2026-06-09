@@ -1,22 +1,23 @@
 export interface LLMConfig {
-  provider: "ollama" | "gemini";
+  provider: "ollama" | "gemini" | string;
   base_url: string;
   model: string;
   enabled?: boolean;
 }
 
 export interface ImageConfig {
-  provider: "zimage" | "gemini" | "unsplash";
+  provider: "zimage" | "gemini" | "unsplash" | string;
   base_url: string;
   model: string;
   enabled?: boolean;
   default_size?: string;
   steps?: number;
   cfg?: number;
+  fallback_enabled?: boolean;
 }
 
 export interface VideoConfig {
-  provider: "ltx" | "ltx_comfy" | "gemini";
+  provider: "ltx" | "ltx_comfy" | "gemini" | string;
   base_url: string;
   model: string;
   enabled?: boolean;
@@ -26,7 +27,7 @@ export interface VideoConfig {
 }
 
 export interface TTSConfig {
-  provider: "f5tts" | "edge" | "gemini";
+  provider: "f5tts" | "edge" | "gemini" | string;
   base_url: string;
   model: string;
   enabled?: boolean;
@@ -34,9 +35,9 @@ export interface TTSConfig {
 }
 
 export interface RenderConfig {
-  provider: "ffmpeg" | "simulated";
+  provider: "ffmpeg" | "simulated" | string;
   enabled?: boolean;
-  output_format?: "mp4" | "mkv";
+  output_format?: "mp4" | "mkv" | string;
 }
 
 export interface ProviderSettings {
