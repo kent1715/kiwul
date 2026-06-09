@@ -1,0 +1,370 @@
+import React, { useState } from "react";
+import { Scene, Storyboard, StoryboardPart } from "../types";
+import { 
+  Play, 
+  Sparkles, 
+  RotateCw, 
+  Check, 
+  Edit, 
+  Lock, 
+  Unlock, 
+  Volume2, 
+  Clapperboard, 
+  Compass, 
+  Flame, 
+  UtensilsCrossed, 
+  HelpCircle 
+} from "lucide-react";
+
+interface StoryboardViewProps {
+  storyboard: Storyboard | undefined;
+  onUpdateScene: (sceneId: string, updatedFields: Partial<Scene>) => void;
+  onRegenerateImage: (sceneId: string, customPrompt?: string) => Promise<void>;
+  onRegenerateVoice: (sceneId: string, customVO?: string) => Promise<void>;
+  onPreviewScene: (scene: Scene) => void;
+}
+
+export default function StoryboardView({
+  storyboard,
+  onUpdateScene,
+  onRegenerateImage,
+  onRegenerateVoice,
+  onPreviewScene
+}: StoryboardViewProps) {
+  const [editingCell, setEditingCell] = useState<{ sceneId: string; field: keyof Scene } | null>(null);
+  const [editedValue, setEditedValue] = useState("");
+  const [loadingSceneId, setLoadingSceneId] = useState<string | null>(null);
+  const [lockedSeeds, setLockedSeeds] = useState<Record<string, boolean>>({});
+  const [speakingSceneId, setSpeakingSceneId] = useState<string | null>(null);
+
+  if (!storyboard) {
+    return (
+      <div className="py-12 text-center bg-zinc-950/30 border border-zinc-900 rounded-xl">
+        <Sparkles size={24} className="mx-auto text-zinc-650 animate-pulse mb-3" />
+        <h4 className="text-xs font-semibold text-zinc-400">Storyboard Belum Terbentuk</h4>
+        <p className="text-[10px] text-zinc-600 max-w-xs mx-auto mt-1">Selesaikan langkah sebelumnya terlebih dahulu untuk mengurai naskah narasi menjadi storyboard per scene.</p>
+      </div>
+    );
+  }
+
+  const handleStartEdit = (sceneId: string, field: keyof Scene, currentValue: string) => {
+    setEditingCell({ sceneId, field });
+    setEditedValue(currentValue);
+  };
+
+  const handleSaveEdit = (sceneId: string, field: keyof Scene) => {
+    onUpdateScene(sceneId, { [field]: editedValue });
+    setEditingCell(null);
+  };
+
+  const triggerRegenImage = async (sceneId: string, currentPrompt: string) => {
+    setLoadingSceneId(sceneId);
+    try {
+      await onRegenerateImage(sceneId, currentPrompt);
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setLoadingSceneId(null);
+    }
+  };
+
+  const toggleSeedClass = (sceneId: string) => {
+    setLockedSeeds(prev => ({
+      ...prev,
+      [sceneId]: !prev[sceneId]
+    }));
+  };
+
+  // Speaks out VO in Indonesian beautifully using browser SpeechSynthesis
+  const speakVoiceOver = (scene: Scene) => {
+    if (!scene.vo) return;
+    
+    // Stop any active speech
+    window.speechSynthesis.cancel();
+    
+    if (speakingSceneId === scene.scene_id) {
+      setSpeakingSceneId(null);
+      return;
+    }
+    
+    setSpeakingSceneId(scene.scene_id);
+    const utterance = new SpeechSynthesisUtterance(scene.vo);
+    utterance.lang = "id-ID"; // Indonesian Voice
+    utterance.rate = 1.05;
+    
+    utterance.onend = () => {
+      setSpeakingSceneId(null);
+    };
+    utterance.onerror = () => {
+      setSpeakingSceneId(null);
+    };
+    
+    window.speechSynthesis.speak(utterance);
+  };
+
+  const getPartIcon = (iconName?: string) => {
+    switch (iconName) {
+      case "cookpot":
+        return <UtensilsCrossed size={14} className="text-amber-400" />;
+      case "flame":
+        return <Flame size={14} className="text-orange-400" />;
+      case "star":
+        return <Sparkles size={14} className="text-amber-400" />;
+      default:
+        return <Compass size={14} className="text-amber-450" />;
+    }
+  };
+
+  return (
+    <div className="space-y-8">
+      {/* Structural Storyboard Table */}
+      <div className="border border-zinc-800 rounded-xl bg-zinc-950/60 overflow-hidden shadow-2xl">
+        <div className="p-4 bg-zinc-900/50 border-b border-zinc-800 flex justify-between items-center">
+          <div>
+            <h3 className="text-xs font-bold text-zinc-300 font-mono tracking-tight">{storyboard.title}</h3>
+            <p className="text-[10px] text-zinc-500 font-medium">Visual format: {storyboard.format} • Total durasi: {storyboard.duration_total}s</p>
+          </div>
+          <div className="flex gap-2.5 items-center text-[10px] text-zinc-500">
+            <span className="flex items-center gap-1"><Volume2 size={11} /> Auto-TTS ID</span>
+            <span>•</span>
+            <span className="flex items-center gap-1"><Clapperboard size={11} /> 9:16 Cinematic Grid</span>
+          </div>
+        </div>
+
+        <div className="overflow-x-auto">
+          <table className="w-full text-left text-xs border-collapse">
+            <thead>
+              <tr className="bg-zinc-900/30 text-zinc-500 text-[10px] font-semibold tracking-wider uppercase border-b border-zinc-850">
+                <th className="py-3 px-4 w-[140px] text-center">Part / Durasi</th>
+                <th className="py-3 px-4 w-[160px]">Skenario Preview</th>
+                <th className="py-3 px-4 min-w-[200px]">Aksi & Gesture (Action)</th>
+                <th className="py-3 px-4 min-w-[200px]">Suara Narasi (Voice Over)</th>
+                <th className="py-3 px-4 min-w-[240px]">Gambar Prompt (Text-to-Image)</th>
+                <th className="py-3 px-4 w-[160px]">Status & Aksi</th>
+              </tr>
+            </thead>
+            <tbody>
+              {storyboard.parts.map((part: StoryboardPart) => {
+                return (
+                  <React.Fragment key={`part-${part.part_number}`}>
+                    {/* Part Header row */}
+                    <tr className="bg-zinc-900/50 border-t border-zinc-800">
+                      <td colSpan={6} className="py-2.5 px-4">
+                        <div className="flex items-center gap-2">
+                          <div className="p-1 bg-zinc-950 border border-zinc-800 rounded">
+                            {getPartIcon(part.icon)}
+                          </div>
+                          <span className="font-bold text-zinc-300 text-[11px] uppercase tracking-wide">
+                            BAGIAN {part.part_number} — {part.title}
+                          </span>
+                          <span className="ml-2 px-1.5 py-0.5 text-[9px] bg-amber-950/50 border border-amber-900/30 text-amber-400 font-mono rounded">
+                            Rentang Waktu: {part.time_range}
+                          </span>
+                        </div>
+                      </td>
+                    </tr>
+
+                    {/* Scenes under this part */}
+                    {part.scenes.map((scene: Scene) => {
+                      const isImageLoading = loadingSceneId === scene.scene_id;
+                      const isSpeaking = speakingSceneId === scene.scene_id;
+                      const isSeedLocked = lockedSeeds[scene.scene_id] || false;
+
+                      return (
+                        <tr 
+                          key={scene.scene_id}
+                          className="border-t border-zinc-900 hover:bg-zinc-900/10 transition"
+                          id={`storyboard-row-${scene.scene_id}`}
+                        >
+                          {/* Part / Timing metadata column */}
+                          <td className="py-4 px-4 text-center border-r border-zinc-900/80 bg-zinc-900/10">
+                            <div className="font-mono text-zinc-400 font-semibold mb-1">Scene {scene.scene_number}</div>
+                            <div className="inline-block px-1.5 py-0.5 bg-zinc-800/80 border border-zinc-700/50 text-[11px] rounded font-mono text-zinc-300">
+                              {scene.duration} Detik
+                            </div>
+                          </td>
+
+                          {/* Scene Preview Block */}
+                          <td className="py-4 px-4 border-r border-zinc-900/80">
+                            <div className="relative aspect-[9/16] w-[110px] mx-auto rounded-lg border border-zinc-800 bg-zinc-900 shadow-lg overflow-hidden group cursor-pointer"
+                              onClick={() => onPreviewScene(scene)}
+                              title="Klik untuk pratinjau"
+                            >
+                              {scene.image_path ? (
+                                <img 
+                                  src={scene.image_path} 
+                                  alt="Preview" 
+                                  className="w-full h-full object-cover group-hover:scale-105 transition duration-200"
+                                  referrerPolicy="no-referrer"
+                                />
+                              ) : (
+                                <div className="absolute inset-0 flex flex-col items-center justify-center text-center p-2 text-zinc-600 bg-zinc-950">
+                                  <Sparkles size={16} className="animate-pulse text-zinc-500 mb-1" />
+                                  <span className="text-[10px]">No visuals</span>
+                                </div>
+                              )}
+                              {/* Timing watermark */}
+                              <div className="absolute bottom-1 right-1 bg-black/70 px-1 py-0.5 rounded text-[9px] font-mono text-zinc-300">
+                                {scene.time_range || `${scene.scene_number * 5 - 5}-${scene.scene_number * 5}s`}
+                              </div>
+                              <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 flex items-center justify-center transition">
+                                <Play size={16} className="text-white fill-white" />
+                              </div>
+                            </div>
+                          </td>
+
+                          {/* Action cell details */}
+                          <td className="py-4 px-4 border-r border-zinc-900/80">
+                            {editingCell?.sceneId === scene.scene_id && editingCell?.field === "action" ? (
+                              <div className="space-y-1.5">
+                                <textarea 
+                                  value={editedValue}
+                                  onChange={(e) => setEditedValue(e.target.value)}
+                                  className="w-full h-20 bg-zinc-950 border border-zinc-800 rounded p-1.5 text-xs text-zinc-200 focus:outline-none focus:border-amber-500 font-medium"
+                                />
+                                <button 
+                                  onClick={() => handleSaveEdit(scene.scene_id, "action")}
+                                  className="flex items-center gap-1 px-2 py-0.5 bg-amber-500 hover:bg-amber-400 text-zinc-950 text-[10px] font-bold rounded cursor-pointer"
+                                  id={`btn-save-action-${scene.scene_id}`}
+                                >
+                                  <Check size={11} /> Simpan
+                                </button>
+                              </div>
+                            ) : (
+                              <div 
+                                className="group/edit cursor-pointer hover:bg-zinc-900/50 rounded p-1.5 relative min-h-[40px] text-zinc-300 leading-normal"
+                                onClick={() => handleStartEdit(scene.scene_id, "action", scene.action)}
+                              >
+                                {scene.action}
+                                <span className="absolute top-1 right-1 opacity-0 group-hover/edit:opacity-100 text-zinc-500">
+                                  <Edit size={10} />
+                                </span>
+                              </div>
+                            )}
+                          </td>
+
+                          {/* Voice Over Speech narration cell */}
+                          <td className="py-4 px-4 border-r border-zinc-900/80">
+                            {editingCell?.sceneId === scene.scene_id && editingCell?.field === "vo" ? (
+                              <div className="space-y-1.5">
+                                <textarea 
+                                  value={editedValue}
+                                  onChange={(e) => setEditedValue(e.target.value)}
+                                  className="w-full h-20 bg-zinc-950 border border-zinc-800 rounded p-1.5 text-xs text-zinc-200 font-mono focus:border-amber-500 focus:outline-none"
+                                />
+                                <button 
+                                  onClick={() => handleSaveEdit(scene.scene_id, "vo")}
+                                  className="flex items-center gap-1 px-2 py-0.5 bg-amber-500 hover:bg-amber-400 text-zinc-950 text-[10px] font-bold rounded cursor-pointer"
+                                  id={`btn-save-vo-${scene.scene_id}`}
+                                >
+                                  <Check size={11} /> Simpan
+                                </button>
+                              </div>
+                            ) : (
+                              <div className="space-y-2">
+                                <div 
+                                  className="group/edit cursor-pointer hover:bg-zinc-900/50 rounded p-1.5 relative min-h-[40px] text-zinc-300 leading-normal italic font-medium"
+                                  onClick={() => handleStartEdit(scene.scene_id, "vo", scene.vo)}
+                                >
+                                  "{scene.vo}"
+                                  <span className="absolute top-1 right-1 opacity-0 group-hover/edit:opacity-100 text-zinc-500">
+                                    <Edit size={10} />
+                                  </span>
+                                </div>
+                                <button 
+                                  onClick={() => speakVoiceOver(scene)}
+                                  className={`flex items-center gap-1.5 px-2 py-1 ${isSpeaking ? 'bg-amber-600 text-white' : 'bg-zinc-900 hover:bg-zinc-800 text-zinc-400'} rounded border border-zinc-800 text-[10px] font-medium transition`}
+                                  id={`btn-play-voice-${scene.scene_id}`}
+                                >
+                                  <Volume2 size={11} className={isSpeaking ? 'animate-bounce' : ''} />
+                                  {isSpeaking ? "Mendengar..." : "Pengucapan (TTS)"}
+                                </button>
+                              </div>
+                            )}
+                          </td>
+
+                          {/* Image Prompt editor cell */}
+                          <td className="py-4 px-4 border-r border-zinc-900/80">
+                            {editingCell?.sceneId === scene.scene_id && editingCell?.field === "image_prompt" ? (
+                              <div className="space-y-1.5">
+                                <textarea 
+                                  value={editedValue}
+                                  onChange={(e) => setEditedValue(e.target.value)}
+                                  className="w-full h-24 bg-zinc-950 border border-zinc-800 rounded p-1.5 text-xs text-zinc-300 font-mono focus:border-amber-500 focus:outline-none"
+                                />
+                                <button 
+                                  onClick={() => handleSaveEdit(scene.scene_id, "image_prompt")}
+                                  className="flex items-center gap-1 px-2 py-0.5 bg-amber-500 hover:bg-amber-400 text-zinc-950 text-[10px] font-bold rounded cursor-pointer"
+                                  id={`btn-save-prompt-${scene.scene_id}`}
+                                >
+                                  <Check size={11} /> Simpan
+                                </button>
+                              </div>
+                            ) : (
+                              <div className="space-y-2">
+                                <span className="text-[10px] uppercase font-bold text-zinc-600 block">T2I Prompt:</span>
+                                <div 
+                                  className="group/edit cursor-pointer hover:bg-zinc-900/50 rounded p-1.5 relative min-h-[50px] text-zinc-400 font-mono text-[10px] leading-relaxed"
+                                  onClick={() => handleStartEdit(scene.scene_id, "image_prompt", scene.image_prompt)}
+                                >
+                                  {scene.image_prompt}
+                                  <span className="absolute top-1 right-1 opacity-0 group-hover/edit:opacity-100 text-zinc-500">
+                                    <Edit size={10} />
+                                  </span>
+                                </div>
+                                
+                                {scene.motion_prompt && (
+                                  <div className="pt-2 border-t border-zinc-900">
+                                    <span className="text-[9px] uppercase font-bold text-zinc-650 block">Motion:</span>
+                                    <span className="text-[10px] italic text-zinc-500 font-mono">{scene.motion_prompt}</span>
+                                  </div>
+                                )}
+                              </div>
+                            )}
+                          </td>
+
+                          {/* Generation trigger status & action triggers */}
+                          <td className="py-4 px-4 bg-zinc-900/5">
+                            <div className="space-y-2.5">
+                              {/* Generation Buttons */}
+                              <button 
+                                onClick={() => triggerRegenImage(scene.scene_id, scene.image_prompt)}
+                                disabled={isImageLoading}
+                                className="w-full flex items-center justify-center gap-1.5 px-2.5 py-1.5 bg-amber-500 hover:bg-amber-400 text-zinc-950 hover:text-zinc-950 disabled:opacity-40 text-[10px] font-bold rounded-lg shadow-md hover:shadow-amber-500/25 transition cursor-pointer"
+                                id={`btn-regen-image-${scene.scene_id}`}
+                              >
+                                <RotateCw size={11} className={isImageLoading ? 'animate-spin' : ''} />
+                                {isImageLoading ? "Generating..." : "Generate AI"}
+                              </button>
+
+                              {/* Toggle Seed Lock */}
+                              <button 
+                                onClick={() => toggleSeedClass(scene.scene_id)}
+                                className={`w-full flex items-center justify-center gap-1.5 px-2.5 py-1 border ${isSeedLocked ? 'bg-amber-950/40 border-amber-900 text-amber-400' : 'bg-zinc-900 border-zinc-800/80 text-zinc-400'} text-[10px] font-medium rounded-lg transition`}
+                                id={`btn-lock-seed-${scene.scene_id}`}
+                              >
+                                {isSeedLocked ? (
+                                  <>
+                                    <Lock size={11} /> Seat Locked
+                                  </>
+                                ) : (
+                                  <>
+                                    <Unlock size={11} /> Lock Seed (AI)
+                                  </>
+                                )}
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </React.Fragment>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  );
+}

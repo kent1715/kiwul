@@ -1,0 +1,6 @@
+{
+  "name": "Kiwul Content Studio",
+  "description": "Local and cloud-enabled content studio for automated 9:16 vertical short production: generating ideas, storylines, storyboards, voice-overs, and visuals.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

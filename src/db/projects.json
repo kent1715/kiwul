@@ -1,0 +1,208 @@
+[
+  {
+    "project_id": "proj_indomie_001",
+    "title": "Tutorial Membuat Indomie Goreng Rendang",
+    "content_type": "tutorial_cooking",
+    "language": "id",
+    "target_platform": ["tiktok", "reels", "youtube_shorts"],
+    "duration_seconds": 30,
+    "aspect_ratio": "9:16",
+    "resolution": "1080x1920",
+    "visual_style": "realistic cinematic vertical",
+    "status": "audio_ready",
+    "created_at": "2026-06-09T12:00:00Z",
+    "updated_at": "2026-06-09T13:00:00Z",
+    "config": {
+      "niche": "tutorial memasak",
+      "topic": "Indomie Goreng Rendang",
+      "audience": "remaja dan anak kos",
+      "tone": "ceria, hangat, menggugah selera"
+    },
+    "selected_idea_id": "idea_001",
+    "ideas": [
+      {
+        "id": "idea_001",
+        "title": "Cara Masak Indomie Goreng Rendang Lebih Enak",
+        "hook": "Indomie biasa bisa jadi rasa restoran kalau caranya begini.",
+        "angle": "tutorial cepat dan estetis",
+        "content_type": "tutorial_cooking",
+        "estimated_duration": 30
+      },
+      {
+        "id": "idea_002",
+        "title": "Indomie Goreng Rendang Hack Viral",
+        "hook": "Nyesel baru tau bikin Indomie rendang pakai cara ini!",
+        "angle": "sensasional & asyik",
+        "content_type": "tutorial_cooking",
+        "estimated_duration": 30
+      }
+    ],
+    "storyline": {
+      "title": "Cara Masak Indomie Goreng Rendang Lebih Enak",
+      "hook": "Indomie biasa bisa jadi rasa restoran kalau caranya begini.",
+      "core_question": "Bagaimana membuat Indomie Goreng Rendang terlihat lebih menggugah selera?",
+      "story_angle": "Host berhijab memasak di dapur modern minimalis dengan gaya hangat dan ceria.",
+      "opening": "Host menyapa kamera dan memperlihatkan kemasan.",
+      "middle": "Host menunjukkan proses merebus mie secara estetik dan meramu bumbunya.",
+      "ending": "Host menikmati hasil masakan dengan sendok estetik.",
+      "cta": "Coba cara ini di rumah dan simpan videonya ya!",
+      "emotional_arc": "penasaran -> lapar -> puas",
+      "visual_arc": "bahan mentah -> bumbu melimpah -> hasil akhir lezat"
+    },
+    "script": {
+      "full_text": "Halo guys, hari ini kita bikin Indomie Goreng Rendang tingkat restoran. Gunakan bumbu segar tambahan biar rasanya makin medok!",
+      "estimated_duration": 30,
+      "tone": "ceria dan natural",
+      "language": "id"
+    },
+    "character": {
+      "id": "char_host_001",
+      "name": "Siti (Cooking Host)",
+      "gender": "female",
+      "age_range": "22-28",
+      "ethnicity_style": "Indonesian",
+      "face_description": "friendly round face, warm smile, natural makeup",
+      "hair_or_hijab": "cream hijab neatly styled",
+      "outfit": "cream modest cooking outfit with a modern apron",
+      "body_type": "natural proportions",
+      "personality": "cheerful, warm, expert cook",
+      "visual_consistency_prompt": "same Indonesian female host, cream hijab, warm friendly smile, modern apron, cooking studio, realistic skin texture, high detail",
+      "reference_image_path": "https://images.unsplash.com/photo-1573496359142-b8d87734a5a2?auto=format&fit=crop&q=80&w=400&h=400",
+      "negative_prompt": "deformed hands, duplicate face, blurry, low quality, unneat hijab"
+    },
+    "location": {
+      "id": "loc_kitchen_001",
+      "name": "Dapur Modern Minimalis",
+      "description": "modern minimalist kitchen with warm wooden cabinets, white marble countertop, clean cooking utensils",
+      "lighting": "soft natural daylight streaming from a nearby window",
+      "camera_style": "vertical DSLR realistic cooking video with shallow depth of field",
+      "consistency_prompt": "same modern minimalist kitchen, wooden cabinets, white marble countertop, soft natural daylight, cinematic cooking setup, highly detailed",
+      "reference_image_path": "https://images.unsplash.com/photo-1556911220-e15b29be8c8f?auto=format&fit=crop&q=80&w=400&h=400"
+    },
+    "storyboard": {
+      "title": "Storyboard Tutorial Memasak Indomie Goreng Rendang",
+      "duration_total": 30,
+      "format": "vertical 9:16",
+      "character": "Siti (Cooking Host)",
+      "location": "Dapur Modern Minimalis",
+      "music": "cheerful acoustic guitar loop",
+      "parts": [
+        {
+          "part_number": 1,
+          "time_range": "0-10 s",
+          "title": "Persiapan & Hook",
+          "icon": "cookpot",
+          "scenes": [
+            {
+              "scene_id": "scene_001",
+              "part_number": 1,
+              "scene_number": 1,
+              "time_range": "0-5 s",
+              "duration": 5,
+              "action": "Host (Siti) menyapa kamera sambil memegang bungkus mie instan.",
+              "vo": "Halo guys, hari ini kita bikin Indomie Goreng Rendang rasa restoran!",
+              "image_prompt": "Realistic cinematic vertical frame, same Indonesian female host wearing cream hijab and apron, smiling warmly, holding a pack of instant noodles toward the camera, standing in modern minimalist kitchen.",
+              "negative_prompt": "deformed, blurry, low quality",
+              "motion_prompt": "subtle smile, slight camera push-in, hair details static",
+              "image_path": "https://images.unsplash.com/photo-1546069901-ba9599a7e63c?auto=format&fit=crop&q=80&w=600&h=1060",
+              "status": "completed"
+            },
+            {
+              "scene_id": "scene_002",
+              "part_number": 1,
+              "scene_number": 2,
+              "time_range": "5-10 s",
+              "duration": 5,
+              "action": "Close-up bumbu segar (irisan bawang, cabe dan daun bawang) di telenan kayu.",
+              "vo": "Hacks-nya ada di bumbu tambahan ini. Wanginya dijamin juara!",
+              "image_prompt": "Close-up vertical shot of sliced red chili, garlic, and fresh green onions arranged beautifully on a wooden cutting board, modern kitchen counter blurred in background, vibrant colors.",
+              "negative_prompt": "blurry, dark food, messy",
+              "motion_prompt": "slow pan right, subtle focus shift from chili to green onion",
+              "image_path": "https://images.unsplash.com/photo-1598965402521-6fd2328b60a4?auto=format&fit=crop&q=80&w=600&h=1060",
+              "status": "completed"
+            }
+          ]
+        },
+        {
+          "part_number": 2,
+          "time_range": "10-20 s",
+          "title": "Proses Memasak",
+          "icon": "flame",
+          "scenes": [
+            {
+              "scene_id": "scene_003",
+              "part_number": 2,
+              "scene_number": 3,
+              "time_range": "10-15 s",
+              "duration": 5,
+              "action": "Mie instan sedang direbus di panci stainless dengan air mendidih bergelembung.",
+              "vo": "Rebus mie setengah matang aja biar gak lembek pas dicampur nanti ya.",
+              "image_prompt": "A close-up vertical action shot of instant noodles boiling in bubbling water in a stainless steel pot, rising steam, modern stove visible, kitchen background.",
+              "negative_prompt": "burnt, blurry, low contrast",
+              "motion_prompt": "water bubbling intensely, steam rising slowly, camera static",
+              "image_path": "https://images.unsplash.com/photo-1612927601601-6638404737ce?auto=format&fit=crop&q=80&w=600&h=1060",
+              "status": "completed"
+            },
+            {
+              "scene_id": "scene_004",
+              "part_number": 2,
+              "scene_number": 4,
+              "time_range": "15-20 s",
+              "duration": 5,
+              "action": "Mie dituangkan ke dalam piring estetik berisi bumbu rendang pekat.",
+              "vo": "Aduk rata dengan bumbu rendangnya. Aromanya langsung keluar banget!",
+              "image_prompt": "Extremely tempting vertical macro shot of noodles loaded with dark rich rendang sauce and fried shallots on a white minimalist plate, steam rising.",
+              "negative_prompt": "grey noodle, unappetizing",
+              "motion_prompt": "slow tilt down, steam moving gracefully upwards",
+              "image_path": "https://images.unsplash.com/photo-1552611052-33e04de081de?auto=format&fit=crop&q=80&w=600&h=1060",
+              "status": "completed"
+            }
+          ]
+        },
+        {
+          "part_number": 3,
+          "time_range": "20-30 s",
+          "title": "Mukbang & Final",
+          "icon": "star",
+          "scenes": [
+            {
+              "scene_id": "scene_005",
+              "part_number": 3,
+              "scene_number": 5,
+              "time_range": "20-25 s",
+              "duration": 5,
+              "action": "Host menyuap mie ke mulut dengan ekspresi sangat puas dan tersenyum jempol.",
+              "vo": "Mmm, rasanya medok, pedes manis gurih bersatu sempurna!",
+              "image_prompt": "Medium close-up vertical shot, same Indonesian female host in cream hijab smiling joyfully with a forkful of noodles, giving a thumbs up, modern kitchen background.",
+              "negative_prompt": "ugly face, messy eating, deformed face",
+              "motion_prompt": "subtle head nod, friendly wink, slow camera zoom out",
+              "image_path": "https://images.unsplash.com/photo-1565299624946-b28f40a0ae38?auto=format&fit=crop&q=80&w=600&h=1060",
+              "status": "completed"
+            },
+            {
+              "scene_id": "scene_006",
+              "part_number": 3,
+              "scene_number": 6,
+              "time_range": "25-30 s",
+              "duration": 5,
+              "action": "Tampilan akhir piring mie dengan taburan daun bawang dan telur ceplok setengah matang melumuri mie.",
+              "vo": "Yuk buat sekalian di dapur kalian. Jangan lupa follow untuk info hack lainnya!",
+              "image_prompt": "Perfect vertical representation of Indomie Rendang with a beautiful sunny side up egg on top, liquid yolk oozing, fresh green onion garnish, beautiful depth of field.",
+              "negative_prompt": "bad lighting, black background, ugly egg",
+              "motion_prompt": "slow diagonal pan, yolk glistening",
+              "image_path": "https://images.unsplash.com/photo-1569718212165-3a8278d5f624?auto=format&fit=crop&q=80&w=600&h=1060",
+              "status": "completed"
+            }
+          ]
+        }
+      ]
+    },
+    "subtitle_style": {
+      "font": "Inter",
+      "font_size": 42,
+      "position": "bottom",
+      "background": true,
+      "max_words_per_line": 5
+    }
+  }
+]

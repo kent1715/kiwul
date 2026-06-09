@@ -1,0 +1,22 @@
+{
+  "llm": {
+    "provider": "gemini",
+    "base_url": "",
+    "model": "gemini-3.5-flash"
+  },
+  "image": {
+    "provider": "gemini",
+    "base_url": "",
+    "model": "gemini-2.5-flash-image"
+  },
+  "tts": {
+    "provider": "gemini",
+    "base_url": "",
+    "model": "gemini-3.1-flash-tts-preview"
+  },
+  "video": {
+    "provider": "gemini",
+    "base_url": "",
+    "model": "veo-3.1-lite-generate-preview"
+  }
+}

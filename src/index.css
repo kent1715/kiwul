@@ -1,0 +1,55 @@
+@import "tailwindcss";
+
+@theme {
+  --color-accent: var(--theme-accent);
+  --color-accent-hover: var(--theme-accent-hover);
+  --color-accent-subtle: var(--theme-accent-subtle);
+  --color-accent-very-subtle: var(--theme-accent-very-subtle);
+  --color-accent-medium: var(--theme-accent-medium);
+  --color-accent-light: var(--theme-accent-light);
+}
+
+:root, [data-theme="amber"] {
+  --theme-accent: #f59e0b; /* amber-500 */
+  --theme-accent-hover: #d97706; /* amber-600 */
+  --theme-accent-subtle: rgba(245, 158, 11, 0.15);
+  --theme-accent-very-subtle: rgba(245, 158, 11, 0.05);
+  --theme-accent-medium: rgba(245, 158, 11, 0.40);
+  --theme-accent-light: #fde047; /* amber-300 */
+}
+
+[data-theme="emerald"] {
+  --theme-accent: #10b981; /* emerald-500 */
+  --theme-accent-hover: #059669; /* emerald-600 */
+  --theme-accent-subtle: rgba(16, 185, 129, 0.15);
+  --theme-accent-very-subtle: rgba(16, 185, 129, 0.05);
+  --theme-accent-medium: rgba(16, 185, 129, 0.40);
+  --theme-accent-light: #6ee7b7; /* emerald-300 */
+}
+
+[data-theme="violet"] {
+  --theme-accent: #8b5cf6; /* violet-500 */
+  --theme-accent-hover: #7c3aed; /* violet-600 */
+  --theme-accent-subtle: rgba(139, 92, 246, 0.15);
+  --theme-accent-very-subtle: rgba(139, 92, 246, 0.05);
+  --theme-accent-medium: rgba(139, 92, 246, 0.40);
+  --theme-accent-light: #c084fc; /* violet-300 */
+}
+
+[data-theme="rose"] {
+  --theme-accent: #f43f5e; /* rose-500 */
+  --theme-accent-hover: #e11d48; /* rose-600 */
+  --theme-accent-subtle: rgba(244, 63, 94, 0.15);
+  --theme-accent-very-subtle: rgba(244, 63, 94, 0.05);
+  --theme-accent-medium: rgba(244, 63, 94, 0.40);
+  --theme-accent-light: #fda4af; /* rose-300 */
+}
+
+[data-theme="sky"] {
+  --theme-accent: #0ea5e9; /* sky-500 */
+  --theme-accent-hover: #0284c7; /* sky-600 */
+  --theme-accent-subtle: rgba(14, 165, 233, 0.15);
+  --theme-accent-very-subtle: rgba(14, 165, 233, 0.05);
+  --theme-accent-medium: rgba(14, 165, 233, 0.40);
+  --theme-accent-light: #7dd3fc; /* sky-300 */
+}
